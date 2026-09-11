@@ -332,6 +332,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Le fork s'installe **à côté** de l'app d'origine au lieu de la
+            // remplacer. Deux raisons : la signature de debug diffère de celle
+            // des releases de l'amont, donc une installation par-dessus exigerait
+            // une désinstallation — qui emporterait la clé TMDB, les profils et
+            // la progression ; et garder l'application qui marche permet de
+            // comparer les deux catalogues sur le même téléviseur.
+            applicationIdSuffix = ".stremio"
+            versionNameSuffix = "-stremio"
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

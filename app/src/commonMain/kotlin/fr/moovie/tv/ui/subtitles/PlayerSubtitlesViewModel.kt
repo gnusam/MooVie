@@ -11,6 +11,9 @@ import fr.moovie.tv.core.subtitles.usecase.SubtitleTiming
 import fr.moovie.tv.core.subtitles.usecase.rankSubtitles
 import fr.moovie.tv.core.subtitles.usecase.timingFor
 import fr.moovie.tv.data.settings.SettingsRepository
+import fr.moovie.tv.core.subtitles.port.SubtitleCatalog
+import fr.moovie.tv.data.subtitles.StremioSubtitleCatalog
+import fr.moovie.tv.data.subtitles.ChainedSubtitleCatalog
 import fr.moovie.tv.data.subtitles.OpenSubtitlesApi
 import fr.moovie.tv.data.subtitles.OpenSubtitlesCatalog
 import fr.moovie.tv.data.subtitles.OpenSubtitlesSession
@@ -61,11 +64,20 @@ class PlayerSubtitlesViewModel : ViewModel() {
     private val settings = SettingsRepository()
     private val api = OpenSubtitlesApi(openSubtitlesApiKey)
     private val session = OpenSubtitlesSession(api, settings)
-    private val catalog = OpenSubtitlesCatalog(api)
+    /**
+     * OpenSubtitles d'abord, l'addon Stremio quand il ne rend rien.
+     *
+     * Les deux cas où le second sert : une compilation sans clé, où le premier
+     * se déclare indisponible ; et un titre pour lequel il ne trouve rien alors
+     * que l'autre fonds l'a. Voir [ChainedSubtitleCatalog] pour ce que la
+     * cascade garantit, et [StremioSubtitleCatalog] pour ses limites.
+     */
+    private val catalog: SubtitleCatalog =
+        ChainedSubtitleCatalog(listOf(OpenSubtitlesCatalog(api), StremioSubtitleCatalog()))
     private val files = SubtitleFileStore()
 
     private val _state = MutableStateFlow(
-        PlayerSubtitlesState(available = openSubtitlesApiKey.isNotBlank()),
+        PlayerSubtitlesState(available = catalog.available),
     )
     val state: StateFlow<PlayerSubtitlesState> = _state.asStateFlow()
 

@@ -38,7 +38,15 @@ class SubtitleFileStore(
     /** Écrit le sous-titre brut tel que téléchargé, et rend son fichier. */
     fun storeOriginal(mediaKey: String, candidate: SubtitleCandidate, content: String): Path {
         fs.createDirectories(dir)
-        val fichier = dir / "${safe(mediaKey)}_${candidate.fileId}.srt"
+        // `fileId` passe par `safe` **lui aussi**, et ce n'est pas de la
+        // précaution gratuite : le port le declare opaque, « sa forme appartient
+        // au catalogue ». Un catalogue qui y met une URL — ce que fait
+        // StremioSubtitleCatalog — produisait un chemin avec des barres obliques
+        // vers des repertoires inexistants, et une FileNotFoundException non
+        // rattrapee qui fermait l'application au moment de choisir un
+        // sous-titre. Aucun appelant ne doit pouvoir faire tomber le lecteur en
+        // respectant le contrat.
+        val fichier = dir / "${safe(mediaKey)}_${safe(candidate.fileId)}.srt"
         fs.write(fichier) { writeUtf8(content) }
         return fichier
     }
@@ -126,7 +134,11 @@ class SubtitleFileStore(
      */
     private fun contenu(): List<Path> = fs.listOrNull(dir).orEmpty()
 
-    /** `tv:1396:s1e1` porte des deux-points, que Windows refuse dans un nom. */
+    /**
+     * `tv:1396:s1e1` porte des deux-points, que Windows refuse dans un nom — et
+     * un `fileId` de catalogue peut porter n'importe quoi, barres obliques
+     * comprises.
+     */
     private fun safe(mediaKey: String): String =
         mediaKey.replace(Regex("""[^A-Za-z0-9_-]"""), "_")
 }
