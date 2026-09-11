@@ -46,3 +46,7 @@ app/mpv-linux/
 /iosApp/Moovie.xcodeproj/
 /iosApp/*.xcworkspace/
 /iosApp/build/
+
+# Fork personnel : configuration stremio en dur, elle porte la clé du debrid.
+# Voir StremioConfig.kt — ce fichier ne doit jamais rejoindre un dépôt public.
+app/src/commonMain/kotlin/fr/moovie/tv/data/sources/StremioConfig.kt
