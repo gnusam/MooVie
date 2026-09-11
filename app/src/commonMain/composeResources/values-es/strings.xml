@@ -381,6 +381,9 @@
     <string name="subtitles_backdrop_box">Banda</string>
     <string name="subtitles_no_key">Esta versión se compiló sin clave de OpenSubtitles: los subtítulos están desactivados.</string>
     <string name="player_online_subtitles">Subtítulos en línea</string>
+    <string name="player_subtitles_translate_title">Traducción</string>
+    <string name="player_subtitles_translate">Traducir al francés</string>
+    <string name="player_subtitles_translating">Traduciendo… %1$d / %2$d líneas</string>
     <string name="player_subtitles_searching">Buscando…</string>
     <string name="player_subtitles_none_found">No se encontraron subtítulos para este título.</string>
     <string name="player_subtitles_quota_out">Cuota agotada. Se renueva a medianoche UTC.</string>

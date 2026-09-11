@@ -383,6 +383,9 @@
     <string name="subtitles_backdrop_box">Bandeau</string>
     <string name="subtitles_no_key">Cette version a été compilée sans clé OpenSubtitles : les sous-titres sont désactivés.</string>
     <string name="player_online_subtitles">Sous-titres en ligne</string>
+    <string name="player_subtitles_translate_title">Traduction</string>
+    <string name="player_subtitles_translate">Traduire en français</string>
+    <string name="player_subtitles_translating">Traduction… %1$d / %2$d répliques</string>
     <string name="player_subtitles_searching">Recherche…</string>
     <string name="player_subtitles_none_found">Aucun sous-titre trouvé pour ce titre.</string>
     <string name="player_subtitles_quota_out">Quota épuisé. Il se recharge à minuit UTC.</string>

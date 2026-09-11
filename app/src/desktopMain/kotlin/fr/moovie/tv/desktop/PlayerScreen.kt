@@ -116,6 +116,7 @@ import fr.moovie.tv.ui.player.PlayerControlBar
 import fr.moovie.tv.ui.player.PlayerDialogKind
 import fr.moovie.tv.ui.subtitles.PlayerSubtitlesViewModel
 import fr.moovie.tv.ui.subtitles.onlineSubtitleSection
+import fr.moovie.tv.ui.subtitles.subtitleTranslationSection
 import fr.moovie.tv.ui.subtitles.subtitleFpsSection
 import fr.moovie.tv.ui.subtitles.subtitleSyncSection
 import fr.moovie.tv.ui.player.PlayerOptionsDialog
@@ -1244,7 +1245,9 @@ internal fun DesktopPlayerScreen(
         when (dialog.takeIf { it != PlayerDialogKind.EPISODES }) {
             PlayerDialogKind.EPISODES -> Unit
             PlayerDialogKind.SUBTITLES -> PlayerOptionsDialog(
-                sections = listOf(
+                // `listOfNotNull` : la section de traduction s'absente quand
+                // aucune cle d'API n'est configuree, plutot que de s'afficher grisee.
+                sections = listOfNotNull(
                     subtitleSection(tracks) { trackId ->
                         // Une piste intégrée et un sous-titre externe affichés
                         // ensemble se chevauchent : choisir l'une retire l'autre.
@@ -1265,6 +1268,9 @@ internal fun DesktopPlayerScreen(
                         onReset = subsViewModel::resetTiming,
                     ),
                     subtitleFpsSection(subsState) { subsViewModel.assumeSubtitleFps(it) },
+                    // La modale reste ouverte : la traduction dure, et son
+                    // avancement s'affiche sur cette meme ligne.
+                    subtitleTranslationSection(subsState) { subsViewModel.translate() },
                 ),
                 onDismiss = { dialog = null },
             )

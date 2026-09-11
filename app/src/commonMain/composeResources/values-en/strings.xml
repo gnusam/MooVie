@@ -381,6 +381,9 @@
     <string name="subtitles_backdrop_box">Band</string>
     <string name="subtitles_no_key">This build was compiled without an OpenSubtitles key: subtitles are disabled.</string>
     <string name="player_online_subtitles">Online subtitles</string>
+    <string name="player_subtitles_translate_title">Translation</string>
+    <string name="player_subtitles_translate">Translate into French</string>
+    <string name="player_subtitles_translating">Translating… %1$d / %2$d lines</string>
     <string name="player_subtitles_searching">Searching…</string>
     <string name="player_subtitles_none_found">No subtitles found for this title.</string>
     <string name="player_subtitles_quota_out">Quota used up. It renews at midnight UTC.</string>

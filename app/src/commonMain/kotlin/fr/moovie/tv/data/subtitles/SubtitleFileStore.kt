@@ -52,6 +52,34 @@ class SubtitleFileStore(
     }
 
     /**
+     * Relit un fichier déjà rangé, ou null s'il a disparu.
+     *
+     * Null et non une exception : le cache vit dans le répertoire que le système
+     * peut purger à tout moment, et un fichier absent est un cas normal.
+     */
+    fun read(fichier: Path): String? =
+        runCatching { fs.read(fichier) { readUtf8() } }.getOrNull()
+
+    /**
+     * Range la **traduction** d'un sous-titre, à côté de son original.
+     *
+     * Un nom distinct, et pas un écrasement : l'original reste la source de
+     * vérité, et c'est lui qu'on retraduit si la traduction est reprise ou
+     * relancée. Écraser rendrait la deuxième passe impossible — on traduirait du
+     * français vers du français.
+     *
+     * Réécrit à chaque lot, et c'est voulu : le fichier est complet et jouable à
+     * toutes les étapes, les répliques pas encore traduites y figurant dans leur
+     * langue d'origine.
+     */
+    fun storeTranslated(mediaKey: String, candidate: SubtitleCandidate, content: String): Path {
+        fs.createDirectories(dir)
+        val fichier = dir / "${safe(mediaKey)}_${safe(candidate.fileId)}_trad.srt"
+        fs.write(fichier) { writeUtf8(content) }
+        return fichier
+    }
+
+    /**
      * Produit la version à donner au lecteur. Sans réglage, c'est l'original
      * lui-même — inutile de recopier 46 Ko pour ne rien changer.
      */

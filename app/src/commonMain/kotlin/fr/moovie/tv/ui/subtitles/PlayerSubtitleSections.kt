@@ -6,6 +6,9 @@ import fr.moovie.tv.core.subtitles.usecase.COMMON_FPS
 import fr.moovie.tv.resources.Res
 import fr.moovie.tv.resources.player_online_subtitles
 import fr.moovie.tv.resources.player_subtitles_downloaded
+import fr.moovie.tv.resources.player_subtitles_translate
+import fr.moovie.tv.resources.player_subtitles_translate_title
+import fr.moovie.tv.resources.player_subtitles_translating
 import fr.moovie.tv.resources.player_subtitles_earlier
 import fr.moovie.tv.resources.player_subtitles_fps
 import fr.moovie.tv.resources.player_subtitles_fps_auto
@@ -76,6 +79,39 @@ fun onlineSubtitleSection(
         }
     }
     return PlayerOptionSection(title, options)
+}
+
+/**
+ * Traduire en français le sous-titre affiché.
+ *
+ * Rend `null` — donc rien à l'écran — sans clé d'API ou sans sous-titre actif.
+ * Une action grisée ferait croire à une panne là où il n'y a qu'une fonction
+ * non configurée.
+ *
+ * Pendant la traduction, la même ligne devient un compteur. Elle reste dans la
+ * liste plutôt que de disparaître : c'est le seul endroit où l'utilisateur peut
+ * vérifier que quelque chose avance, et l'attente se compte en dizaines de
+ * secondes sur un long film.
+ */
+@Composable
+fun subtitleTranslationSection(
+    state: PlayerSubtitlesState,
+    onTranslate: () -> Unit,
+): PlayerOptionSection? {
+    if (!state.canTranslate || state.active == null) return null
+    val progres = state.translated
+    val option = if (progres == null) {
+        PlayerOption(stringResource(Res.string.player_subtitles_translate), false) { onTranslate() }
+    } else {
+        PlayerOption(
+            stringResource(Res.string.player_subtitles_translating, progres.first, progres.second),
+            selected = false,
+        ) {}
+    }
+    return PlayerOptionSection(
+        stringResource(Res.string.player_subtitles_translate_title),
+        listOf(option),
+    )
 }
 
 /**

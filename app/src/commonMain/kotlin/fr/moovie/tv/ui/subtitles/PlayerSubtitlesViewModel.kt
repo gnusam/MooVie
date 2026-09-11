@@ -13,6 +13,11 @@ import fr.moovie.tv.core.subtitles.usecase.timingFor
 import fr.moovie.tv.data.settings.SettingsRepository
 import fr.moovie.tv.core.subtitles.port.SubtitleCatalog
 import fr.moovie.tv.data.subtitles.StremioSubtitleCatalog
+import fr.moovie.tv.core.subtitles.usecase.parseSrt
+import fr.moovie.tv.core.subtitles.usecase.renderSrt
+import fr.moovie.tv.core.subtitles.usecase.translateCues
+import fr.moovie.tv.data.subtitles.ClaudeSubtitleTranslator
+import fr.moovie.tv.data.subtitles.TraductionConfig
 import fr.moovie.tv.data.subtitles.ChainedSubtitleCatalog
 import fr.moovie.tv.data.subtitles.OpenSubtitlesApi
 import fr.moovie.tv.data.subtitles.OpenSubtitlesCatalog
@@ -42,6 +47,19 @@ data class PlayerSubtitlesState(
     val timing: SubtitleTiming = SubtitleTiming.None,
     val quota: SubtitleQuota = SubtitleQuota.Unknown,
     val trouble: SubtitleTrouble? = null,
+    /**
+     * La traduction est-elle proposable ? Faux sans clé d'API : l'action ne
+     * s'affiche pas du tout, plutôt que d'echouer une fois touchée.
+     */
+    val canTranslate: Boolean = false,
+    /**
+     * Répliques déjà traduites sur le total, ou null hors traduction.
+     *
+     * Deux nombres et pas un pourcentage : ce qui rassure devant une attente
+     * d'une minute, c'est de voir un compteur avancer, et le total dit d'emblée
+     * l'ordre de grandeur de ce qui reste.
+     */
+    val translated: Pair<Int, Int>? = null,
 )
 
 /**
@@ -76,8 +94,17 @@ class PlayerSubtitlesViewModel : ViewModel() {
         ChainedSubtitleCatalog(listOf(OpenSubtitlesCatalog(api), StremioSubtitleCatalog()))
     private val files = SubtitleFileStore()
 
+    /**
+     * Traducteur à la demande. Inerte sans clé d'API — voir [TraductionConfig] —
+     * et l'écran ne propose alors rien du tout.
+     */
+    private val translator = ClaudeSubtitleTranslator()
+
     private val _state = MutableStateFlow(
-        PlayerSubtitlesState(available = catalog.available),
+        PlayerSubtitlesState(
+            available = catalog.available,
+            canTranslate = translator.configured,
+        ),
     )
     val state: StateFlow<PlayerSubtitlesState> = _state.asStateFlow()
 
@@ -156,6 +183,10 @@ class PlayerSubtitlesViewModel : ViewModel() {
         }
 
         original = source
+        // Un autre sous-titre est une autre traduction : le compteur du
+        // precedent n'a plus de sens et laisserait l'ecran en « traduction en
+        // cours » sur un fichier qui ne l'est pas.
+        _state.value = _state.value.copy(translated = null)
         // La correction de cadence s'applique d'emblée : c'est la dérive qu'un
         // curseur de décalage ne rattrape pas, autant partir juste.
         val timing = timingFor(candidate.fps, streamFps)
@@ -166,6 +197,38 @@ class PlayerSubtitlesViewModel : ViewModel() {
             downloaded = files.storedIds(mediaKey),
         )
         publish(timing)
+    }
+
+    /**
+     * Traduit le sous-titre actif vers le français, **pendant la lecture**.
+     *
+     * Chaque lot republie un fichier entier : le lecteur le recharge par le
+     * chemin habituel, celui qui sert déjà au décalage et à la cadence. Rien de
+     * neuf côté lecteur, donc, et la traduction apparaît par le début du film —
+     * qui est justement ce qu'on est en train de regarder.
+     *
+     * Relancer sur un sous-titre déjà traduit repart de **l'original** conservé
+     * à côté : sans ça, la deuxième passe traduirait du français vers du
+     * français.
+     */
+    fun translate() = io {
+        val candidate = _state.value.active ?: return@io
+        val source = original ?: return@io
+        if (!translator.configured || _state.value.translated != null) return@io
+
+        val cues = parseSrt(files.read(source) ?: return@io)
+        if (cues.isEmpty()) return@io
+        _state.value = _state.value.copy(translated = 0 to cues.size)
+
+        val traduits = translateCues(cues, translator) { partiel, faites ->
+            val fichier = files.storeTranslated(mediaKey, candidate, renderSrt(partiel))
+            original = fichier
+            _state.value = _state.value.copy(translated = faites to cues.size)
+            publish(_state.value.timing)
+        }
+        original = files.storeTranslated(mediaKey, candidate, renderSrt(traduits))
+        _state.value = _state.value.copy(translated = null)
+        publish(_state.value.timing)
     }
 
     /** Décale le sous-titre, en relatif. */

@@ -102,6 +102,7 @@ import fr.moovie.tv.ui.intro.ReportStep
 import fr.moovie.tv.ui.intro.reportSegmentSection
 import fr.moovie.tv.ui.subtitles.PlayerSubtitlesViewModel
 import fr.moovie.tv.ui.subtitles.onlineSubtitleSection
+import fr.moovie.tv.ui.subtitles.subtitleTranslationSection
 import fr.moovie.tv.ui.subtitles.subtitleFpsSection
 import fr.moovie.tv.ui.subtitles.subtitleSyncSection
 import kotlinx.coroutines.CoroutineScope
@@ -1533,7 +1534,9 @@ fun PlayerScreen(
         when (dialog.takeIf { !enPip && it != PlayerDialogKind.EPISODES }) {
             PlayerDialogKind.EPISODES -> Unit
             PlayerDialogKind.SUBTITLES -> PlayerOptionsDialog(
-                sections = listOf(
+                // `listOfNotNull` : la section de traduction s'absente quand
+                // aucune cle d'API n'est configuree, plutot que de s'afficher grisee.
+                sections = listOfNotNull(
                     subtitleSection(tracks) { trackId ->
                         // Choisir une piste intégrée retire le sous-titre externe :
                         // les deux affichés ensemble se chevauchent.
@@ -1554,6 +1557,9 @@ fun PlayerScreen(
                         onReset = subsViewModel::resetTiming,
                     ),
                     subtitleFpsSection(subsState) { subsViewModel.assumeSubtitleFps(it) },
+                    // La modale reste ouverte : la traduction dure, et son
+                    // avancement s'affiche sur cette meme ligne.
+                    subtitleTranslationSection(subsState) { subsViewModel.translate() },
                 ),
                 onDismiss = { dialog = null },
             )
