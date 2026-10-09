@@ -180,4 +180,17 @@ class StremioParsingTest {
         assertEquals("doublé", StremioProvider.audioOf("Full Metal Alchemist [English Dubbed]\nDubbed / 🇬🇧"))
         assertEquals(null, StremioProvider.audioOf("[Okay-Raws] Fullmetal Alchemist Brotherhood - 01 (BD 1080p)"))
     }
+
+    @Test
+    fun `les encodages que la TV ne decode pas sont ecartes`() {
+        // Hi10P sous ses noms de release : avc1.6E (High 10) plante le decodeur Realtek.
+        assertTrue(StremioProvider.undecodable("[ShadyCrab] FMA Brotherhood [BD 1080p Hi10 FLAC] [Dual Audio]"))
+        assertTrue(StremioProvider.undecodable("Fullmetal.Alchemist.Brotherhood.1080p.BluRay.Dual-Audio.FLAC2.0.Hi10P.x264-JySzE"))
+        assertTrue(StremioProvider.undecodable("[UQW] FMA Brotherhood [BD 1080p AVC-YUV420P10 FLAC] 10bit AVC"))
+        // AV1 : aucun decodeur declare sur la TV.
+        assertTrue(StremioProvider.undecodable("[BlackRabbit] FMA Brotherhood [Bluray-1080p][Opus 2.0][Dual Audio][AV1]"))
+        // HEVC 10 bits : Main10, le profil du HDR10, decode.
+        assertEquals(false, StremioProvider.undecodable("[Reaktor] FMA Brotherhood - E01 v2 [1080p][x265][10-bit][Dual-Audio].mkv"))
+        assertEquals(false, StremioProvider.undecodable("Dune.2021.1080p.BluRay.x264-SPARKS"))
+    }
 }

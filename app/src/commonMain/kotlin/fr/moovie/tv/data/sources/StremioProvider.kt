@@ -145,6 +145,8 @@ class StremioProvider(
                 ?.get("filename")?.jsonPrimitive?.contentOrNull()
                 ?: title.lineSequence().firstOrNull().orEmpty()
 
+            if (undecodable("$filename\n$title")) return@mapNotNull null
+
             Classe(
                 lien = EmbedLink(
                     url = url,
@@ -165,6 +167,31 @@ class StremioProvider(
         content.takeIf { it.isNotBlank() && it != "null" }
 
     internal companion object {
+
+        /**
+         * Vrai pour un encodage qu'aucun décodeur matériel courant ne lit.
+         *
+         * Mesuré le 09/10/2026 sur la TCL (puce Realtek, Android 9) : un
+         * Fullmetal Alchemist en `avc1.6E0832` — H.264 **High 10**, le « Hi10P »
+         * des fansubs d'anime — est déclaré `NO_EXCEEDS` par ExoPlayer et fait
+         * planter `OMX.realtek.video.decoder`. Le lecteur rend alors la main à
+         * la fiche, sans rien jouer. Le décodeur logiciel ne sauve rien : il
+         * refuse ce profil lui aussi, et un ARM 32 bits n'y suffirait pas.
+         *
+         * Écartés : le Hi10P sous ses noms de release (`Hi10`, `Hi10P`), le
+         * H.264 dit 10 bits, et l'AV1 — la TV ne déclare aucun décodeur AV1.
+         * Le **HEVC 10 bits reste** : Main10 est le profil du HDR10, que la
+         * puce décode.
+         */
+        fun undecodable(text: String): Boolean {
+            val t = text.uppercase()
+            if (Regex("""\bHI10P?\b""").containsMatchIn(t)) return true
+            if (Regex("""\bAV1\b""").containsMatchIn(t)) return true
+            val tenBit = Regex("""\b10[ ._-]?BITS?\b""").containsMatchIn(t)
+            val avc = Regex("""\b(X264|AVC|H[ .]?264)\b""").containsMatchIn(t)
+            val hevc = Regex("""\b(X265|HEVC|H[ .]?265)\b""").containsMatchIn(t)
+            return tenBit && avc && !hevc
+        }
 
         /** `[RD+]`, `[AD+]`, `[PM+]`, `[TB+]`, `[DL+]` — le `+` dit « déjà chez eux ». */
         val CACHED_RE = Regex("""\[[A-Z]{2}\+]""")
