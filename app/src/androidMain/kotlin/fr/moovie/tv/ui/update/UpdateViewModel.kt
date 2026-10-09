@@ -49,8 +49,24 @@ class UpdateViewModel(app: Application) : AndroidViewModel(app) {
     private val _checkStatus = MutableStateFlow(UpdateCheck.IDLE)
     val checkStatus: StateFlow<UpdateCheck> = _checkStatus
 
+    /**
+     * Le fork Stremio ne se met jamais à jour depuis les releases de l'amont.
+     *
+     * Les releases de `JibayMcs/MooVie` sont du MooVie vanilla : signées d'une
+     * autre clé (donc refusées à l'installation par-dessus notre build de
+     * debug), et les installer remplacerait le fork par l'amont. Pire, notre
+     * `VERSION_NAME` porte le suffixe `-stremio`, pris pour une préversion en
+     * semver : l'amont `1.25.0` est alors jugé « plus récent » que notre
+     * `1.25.0-stremio`, et la bannière se rouvrait à chaque démarrage. Le fork
+     * se met à jour par `adb install`, pas par ce canal. On le reconnaît au
+     * suffixe d'applicationId posé sur le build Stremio.
+     */
+    private val estFork = BuildConfig.APPLICATION_ID.endsWith(".stremio")
+
     init {
-        viewModelScope.launch {
+        // Pas de vérification amont sur le fork : ni boucle périodique, ni
+        // bannière. Voir estFork.
+        if (!estFork) viewModelScope.launch {
             // collectLatest : changer l'intervalle dans les réglages relance
             // aussitôt la boucle avec la nouvelle valeur.
             settings.updateInterval.collectLatest { interval ->
@@ -71,6 +87,9 @@ class UpdateViewModel(app: Application) : AndroidViewModel(app) {
      * trouvée : c'est la bannière qui le dit, les réglages n'ont rien à ajouter.
      */
     private suspend fun check(): UpdateCheck {
+        // Le fork ne se compare pas à l'amont, même déclenché depuis les
+        // réglages : voir estFork.
+        if (estFork) return UpdateCheck.UP_TO_DATE
         // Ne pas écraser un téléchargement en cours ni une erreur affichée.
         if (_state.value is UpdateState.Downloading || _state.value is UpdateState.Error) {
             return UpdateCheck.IDLE
