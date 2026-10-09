@@ -57,10 +57,20 @@ fun rankSubtitles(
      * « 02 - Body of the Sanctioned ».
      */
     episodeTitle: String? = null,
+    /**
+     * Le même titre dans d'autres langues, l'anglais surtout : l'application
+     * interroge TMDB en français, et les releases d'OpenSubtitles sont nommées
+     * en anglais — « Body of the Sanctioned », jamais « Le Corps des
+     * sacrifiés ». Mesuré le 09/10/2026 à 23:06 : sans lui, le classement
+     * reprenait le Brotherhood.
+     */
+    episodeTitles: List<String> = emptyList(),
 ): List<SubtitleCandidate> {
     val langOrder = preferredLanguages.map { it.lowercase() }
     val stream = normalizeFps(streamFps)
-    val titre = episodeTitle?.let(::normalizeTitle)?.takeIf { it.length >= 4 }
+    val titres = (listOfNotNull(episodeTitle) + episodeTitles)
+        .map(::normalizeTitle)
+        .filter { it.length >= 4 }
 
     return candidates.sortedWith(
         compareBy<SubtitleCandidate> { candidate ->
@@ -73,7 +83,10 @@ fun rankSubtitles(
             // ne correspond pas se corrige. Constaté sur la sonde, où un
             // « Fight.Club.Forced » sortait en tête parce qu'il était le seul à
             // la bonne cadence.
-            .thenBy { if (titre != null && normalizeTitle(it.release).contains(titre)) 0 else 1 }
+            .thenBy { candidate ->
+                val release = normalizeTitle(candidate.release)
+                if (titres.any { release.contains(it) }) 0 else 1
+            }
             .thenBy { if (it.foreignPartsOnly == preferForced) 0 else 1 }
             .thenBy { if (it.hearingImpaired == preferHearingImpaired) 0 else 1 }
             .thenBy { if (it.machineTranslated) 1 else 0 }

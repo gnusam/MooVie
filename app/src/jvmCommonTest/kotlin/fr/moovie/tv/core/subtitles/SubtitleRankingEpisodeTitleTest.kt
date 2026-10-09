@@ -29,4 +29,15 @@ class SubtitleRankingEpisodeTitleTest {
         val classes = rankSubtitles(listOf(brotherhood, points), listOf("en"), episodeTitle = "Body of the Sanctioned")
         assertEquals("x", classes.first().fileId)
     }
+
+    @Test
+    fun `le titre francais de TMDB ne suffit pas, l'anglais rattrape`() {
+        val classes = rankSubtitles(
+            listOf(brotherhood, sanctioned),
+            listOf("en"),
+            episodeTitle = "Le Corps des sacrifiés",
+            episodeTitles = listOf("Body of the Sanctioned"),
+        )
+        assertEquals("2574729", classes.first().fileId)
+    }
 }

@@ -1,5 +1,6 @@
 package fr.moovie.tv.ui.subtitles
 
+import fr.moovie.tv.data.tmdb.TmdbRepository
 import fr.moovie.tv.data.subtitles.SubtitleChoiceRepository
 import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.shared.dispatcherEs
@@ -171,6 +172,18 @@ class PlayerSubtitlesViewModel : ViewModel() {
 
         val languages = settings.subtitleLanguages.first()
         val found = catalog.search(media, languages)
+        // Le titre anglais de l'épisode, pour reconnaître les releases : TMDB
+        // est interrogé en français partout ailleurs. Un appel, en échec
+        // silencieux — le classement se passe de lui, en moins bien.
+        val titreAnglais = if (id.isTv && episodeTitle.isNotBlank()) {
+            runCatching {
+                TmdbRepository("en-US").season(settings.tmdbApiKey.first(), id.tmdbId, id.season)
+                    .episodes.firstOrNull { it.episodeNumber == id.episode }?.name
+            }.getOrNull()
+        } else {
+            null
+        }
+        Chrono.repere("sous-titres : titre de l'épisode « $episodeTitle », en anglais « ${titreAnglais.orEmpty()} »")
         Chrono.repere(
             "sous-titres : recherche $mediaKey ($media) -> ${found.size} candidats ; premiers : " +
                 found.take(3).joinToString(" | ") { "${it.language} ${it.fileId} ${it.release.take(40)}" },
@@ -188,6 +201,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
                 preferHearingImpaired = settings.subtitlePreferHearingImpaired.first(),
                 preferForced = settings.subtitlePreferForced.first(),
                 episodeTitle = episodeTitle.takeIf { it.isNotBlank() },
+                episodeTitles = listOfNotNull(titreAnglais?.takeIf { it.isNotBlank() }),
             ),
             trouble = if (found.isEmpty()) SubtitleTrouble.NOTHING_FOUND else null,
             quota = catalog.quota(),
