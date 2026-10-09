@@ -57,7 +57,13 @@ fun ProfileHost(content: @Composable (profileId: String) -> Unit) {
 
     LaunchedEffect(Unit) {
         val active = repo.restoreActive()
-        session = if (repo.profiles.first().size > 1) null else active
+        val profils = repo.profiles.first()
+        // Le dernier profil utilisé entre directement : la porte ne s'ouvre
+        // que s'il a disparu. Changer reste possible depuis les réglages
+        // (LocalSwitchProfile). Sam, 09/10/2026 : « par défaut, bah, c'est
+        // toujours la même personne qui utilise le truc ».
+        session = active.takeIf { id -> profils.any { it.id == id } }
+            ?: if (profils.size > 1) null else active
         resolved = true
     }
 
