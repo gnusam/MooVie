@@ -187,10 +187,18 @@ class StremioParsingTest {
         assertTrue(StremioProvider.undecodable("[ShadyCrab] FMA Brotherhood [BD 1080p Hi10 FLAC] [Dual Audio]"))
         assertTrue(StremioProvider.undecodable("Fullmetal.Alchemist.Brotherhood.1080p.BluRay.Dual-Audio.FLAC2.0.Hi10P.x264-JySzE"))
         assertTrue(StremioProvider.undecodable("[UQW] FMA Brotherhood [BD 1080p AVC-YUV420P10 FLAC] 10bit AVC"))
+        assertTrue(StremioProvider.undecodable("[NTRM] Fullmetal Alchemist (BD 720p Ma10 FLAC) [Dual-Audio]"))
         // AV1 : aucun decodeur declare sur la TV.
         assertTrue(StremioProvider.undecodable("[BlackRabbit] FMA Brotherhood [Bluray-1080p][Opus 2.0][Dual Audio][AV1]"))
         // HEVC 10 bits : Main10, le profil du HDR10, decode.
         assertEquals(false, StremioProvider.undecodable("[Reaktor] FMA Brotherhood - E01 v2 [1080p][x265][10-bit][Dual-Audio].mkv"))
         assertEquals(false, StremioProvider.undecodable("Dune.2021.1080p.BluRay.x264-SPARKS"))
+    }
+
+    @Test
+    fun `a definition egale, un codec annonce passe devant un rip muet`() {
+        assertEquals(0, StremioProvider.codecRank("[Reaktor] FMA Brotherhood - E01 v2 [1080p][x265][10-bit][Dual-Audio].mkv"))
+        assertEquals(1, StremioProvider.codecRank("[Ryuuga] - Fullmetal Alchemist_ Brotherhood - 01 [1080p-AAC LC-x264]-[WEB-DL]"))
+        assertEquals(2, StremioProvider.codecRank("[Okay-Raws] Fullmetal Alchemist Brotherhood - 01 (BD 1080p) [F84A642E].mkv"))
     }
 }

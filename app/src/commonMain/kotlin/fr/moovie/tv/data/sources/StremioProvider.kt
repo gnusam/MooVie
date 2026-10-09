@@ -155,13 +155,14 @@ class StremioProvider(
                     variant = variantOf(name, title, cached),
                 ),
                 definition = qualityRank(qualityOf(name)),
+                codec = codecRank("$filename\n$title"),
                 octets = sizeBytes(title),
             )
-        }.sortedWith(compareBy({ it.definition }, { ecart(it.octets, cible) })).map { it.lien }
+        }.sortedWith(compareBy({ it.definition }, { it.codec }, { ecart(it.octets, cible) })).map { it.lien }
     }
 
     /** Un lien et les deux nombres qui décident de sa place. Interne au tri. */
-    private data class Classe(val lien: EmbedLink, val definition: Int, val octets: Long?)
+    private data class Classe(val lien: EmbedLink, val definition: Int, val codec: Int, val octets: Long?)
 
     private fun kotlinx.serialization.json.JsonPrimitive.contentOrNull(): String? =
         content.takeIf { it.isNotBlank() && it != "null" }
@@ -185,12 +186,36 @@ class StremioProvider(
          */
         fun undecodable(text: String): Boolean {
             val t = text.uppercase()
+            val hevcAnnonce = Regex("""\b(X265|HEVC|H[ .]?265)\b""").containsMatchIn(t)
             if (Regex("""\bHI10P?\b""").containsMatchIn(t)) return true
+            // « Ma10 » : le 10 bits H.264 de certains groupes, sans le mot Hi10.
+            if (!hevcAnnonce && Regex("""\bMA10\b""").containsMatchIn(t)) return true
             if (Regex("""\bAV1\b""").containsMatchIn(t)) return true
             val tenBit = Regex("""\b10[ ._-]?BITS?\b""").containsMatchIn(t)
             val avc = Regex("""\b(X264|AVC|H[ .]?264)\b""").containsMatchIn(t)
             val hevc = Regex("""\b(X265|HEVC|H[ .]?265)\b""").containsMatchIn(t)
             return tenBit && avc && !hevc
+        }
+
+        /**
+         * Ce qu'on sait du codec vidéo, du plus sûr au moins sûr : 0 pour le
+         * HEVC annoncé, 1 pour un H.264 annoncé comme tel (8 bits, donc
+         * décodable), 2 quand le nom ne dit rien.
+         *
+         * Le filtre [undecodable] ne voit que ce que le nom avoue. Mesuré sur
+         * Fullmetal Alchemist le 09/10/2026 : trois rips Blu-ray d'affilée
+         * (« BD 1080p », sans autre mention) étaient du Hi10P, choisis parce
+         * que leur poids collait au poids visé ; la cascade les a essayés l'un
+         * après l'autre, trois échecs de décodage. Placer d'abord ce qui
+         * s'annonce lisible évite de jouer à la loterie.
+         */
+        fun codecRank(text: String): Int {
+            val t = text.uppercase()
+            return when {
+                Regex("""\b(X265|HEVC|H[ .]?265)\b""").containsMatchIn(t) -> 0
+                Regex("""\b(X264|AVC|H[ .]?264|WEB[ .-]?DL|WEBRIP)\b""").containsMatchIn(t) -> 1
+                else -> 2
+            }
         }
 
         /** `[RD+]`, `[AD+]`, `[PM+]`, `[TB+]`, `[DL+]` — le `+` dit « déjà chez eux ». */
