@@ -115,6 +115,7 @@ fun CastLaunchScreen(
                     sourceUrl = viewModel.playingLink?.url.orEmpty(),
                     hoster = viewModel.playingLink?.hoster.orEmpty(),
                     language = viewModel.playingLink?.language.orEmpty(),
+                    originalLanguage = viewModel.playbackOriginalLanguage,
                     alternatives = viewModel.playbackAlternatives(),
                     // Le point de départ vient du téléphone, pas du magasin de
                     // ce téléviseur — qui n'a aucune raison de connaître un

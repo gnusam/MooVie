@@ -786,6 +786,7 @@ class MainActivity : ComponentActivity() {
                                 sourceUrl = s.sourceUrl,
                                 hoster = s.hoster,
                                 language = s.language,
+                                originalLanguage = s.originalLanguage,
                                 alternatives = s.alternatives,
                                 subtitles = s.subtitles,
                                 title = s.title,

@@ -2,6 +2,7 @@ package fr.moovie.tv.ui.player
 
 import android.graphics.Color
 import android.net.Uri
+import java.util.Locale
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import fr.moovie.tv.core.subtitles.model.SubtitleBackdrop
@@ -317,10 +318,21 @@ internal class ExoPlayerController(private val player: Player) : MooviePlayerCon
         }
     }
 
+    /**
+     * Le nom de la piste tel que l'encodeur l'a écrit, sinon le nom de sa langue
+     * en français : un fichier multi-audio sans titres de pistes affichait
+     * « en » et « ja », illisible dans le menu.
+     */
     private fun Tracks.Group.trackLabel(index: Int): String {
         val format = getTrackFormat(index)
         return format.label
-            ?: format.language?.takeIf { it.isNotBlank() && it != "und" }
+            ?: format.language?.takeIf { it.isNotBlank() && it != "und" }?.let(::languageName)
             ?: "#${index + 1}"
+    }
+
+    private fun languageName(code: String): String {
+        val name = Locale.forLanguageTag(code).getDisplayLanguage(Locale.FRENCH)
+        return if (name.isBlank() || name.equals(code, ignoreCase = true)) code
+        else name.replaceFirstChar { it.titlecase(Locale.FRENCH) }
     }
 }

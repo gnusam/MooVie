@@ -154,6 +154,8 @@ sealed interface Screen {
         val sourceUrl: String = "",
         val hoster: String = "",
         val language: String = "",
+        /** Langue originale TMDB, pour choisir la piste audio d'un fichier multi-audio. */
+        val originalLanguage: String = "",
         /**
          * Les autres sources de la même langue, avec la définition qu'on leur
          * connaît. Elles alimentent le menu « Qualité » : quand l'hébergeur

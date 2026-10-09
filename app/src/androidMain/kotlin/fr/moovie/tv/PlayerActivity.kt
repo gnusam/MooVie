@@ -94,6 +94,7 @@ class PlayerActivity : ComponentActivity() {
                                 sourceUrl = ecran.sourceUrl,
                                 hoster = ecran.hoster,
                                 language = ecran.language,
+                                originalLanguage = ecran.originalLanguage,
                                 alternatives = ecran.alternatives,
                                 subtitles = ecran.subtitles,
                                 title = ecran.title,

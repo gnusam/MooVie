@@ -259,6 +259,7 @@ fun DetailsScreen(
                         sourceUrl = viewModel.playingLink?.url.orEmpty(),
                         hoster = viewModel.playingLink?.hoster.orEmpty(),
                         language = viewModel.playingLink?.language.orEmpty(),
+                        originalLanguage = viewModel.playbackOriginalLanguage,
                         alternatives = viewModel.playbackAlternatives(),
                     ),
                 )

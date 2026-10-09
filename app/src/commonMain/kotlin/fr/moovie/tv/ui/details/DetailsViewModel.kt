@@ -782,6 +782,13 @@ class DetailsViewModel : ViewModel() {
         private set
 
     /**
+     * Langue originale annoncée par TMDB (« ja », « en »…), pour que le lecteur
+     * retienne la piste d'origine d'un fichier multi-audio quand on lit en VO.
+     */
+    var playbackOriginalLanguage: String = ""
+        private set
+
+    /**
      * Les autres sources de la langue en cours, pour le menu « Qualité » du
      * lecteur — celle qui joue exclue, elle n'est pas une alternative à
      * elle-même.
@@ -824,6 +831,7 @@ class DetailsViewModel : ViewModel() {
         playbackSubtitle = movie.details.year.orEmpty()
         playbackNext = null
         playbackPoster = movie.details.posterUrl() ?: movie.details.backdropUrl().orEmpty()
+        playbackOriginalLanguage = movie.details.originalLanguage
         pendingMeta = ResumeEntry(
             key = playbackKey,
             tmdbId = tmdbId,
@@ -861,6 +869,7 @@ class DetailsViewModel : ViewModel() {
         playbackSubtitle = "S$season · E$episode" + (ep?.name?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: "")
         playbackNext = nextEpisodeAfter(tv.details, season, episode)
         playbackPoster = tv.details.posterUrl() ?: tv.details.backdropUrl().orEmpty()
+        playbackOriginalLanguage = tv.details.originalLanguage
         pendingMeta = ResumeEntry(
             key = playbackKey,
             tmdbId = tmdbId,

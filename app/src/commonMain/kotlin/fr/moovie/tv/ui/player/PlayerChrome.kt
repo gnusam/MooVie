@@ -664,6 +664,8 @@ fun PlayerTitleOverlay(
     subtitle: String,
     modifier: Modifier = Modifier,
     clock: String? = null,
+    /** Provenance du flux (catalogue, langue, piste audio) — voir playerSourceLine. */
+    source: String = "",
 ) {
     Box(
         modifier = modifier
@@ -687,6 +689,16 @@ fun PlayerTitleOverlay(
             Text(
                 subtitle,
                 style = MaterialTheme.typography.titleMedium,
+                color = MOOVIE_TEXT_MUTED,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (source.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                source,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MOOVIE_TEXT_MUTED,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

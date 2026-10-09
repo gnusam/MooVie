@@ -266,6 +266,27 @@ class StremioProvider(
         }
 
         /**
+         * Ce que le fichier porte comme audio, pour choisir sur la fiche :
+         * « multi-audio » quand l'original et un doublage cohabitent (le
+         * lecteur prend alors la langue voulue), « doublé » quand le fichier
+         * n'a qu'un doublage — étiqueté VO faute de marqueur français, il ne
+         * contient pourtant pas la version originale.
+         *
+         * Torrentio l'écrit dans `title` (`Dubbed / Dual Audio`), les releases
+         * dans le nom (`[Dual-Audio]`, `Multi-Audio`, `Tri Audio`).
+         */
+        fun audioOf(title: String): String? {
+            val t = title.uppercase()
+            return when {
+                MULTI_AUDIO_RE.containsMatchIn(t) -> "multi-audio"
+                Regex("""\bDUBBED\b""").containsMatchIn(t) -> "doublé"
+                else -> null
+            }
+        }
+
+        private val MULTI_AUDIO_RE = Regex("""\b(DUAL|MULTI|TRI)[ ._-]?AUDIO\b""")
+
+        /**
          * Ce qui sépare deux liens du même debrid dans la même langue : la
          * définition et le poids. Sur ce catalogue il y en a des dizaines par
          * titre, c'est donc le seul critère de choix qui reste à l'écran.
@@ -278,6 +299,7 @@ class StremioProvider(
             val parts = buildList {
                 qualityOf(name)?.let { add(it) }
                 SIZE_RE.find(title)?.let { add(it.value.replace(',', '.')) }
+                audioOf(title)?.let { add(it) }
                 if (!cached) add("à mettre en cache")
             }
             return parts.joinToString(" · ").takeIf { it.isNotBlank() }

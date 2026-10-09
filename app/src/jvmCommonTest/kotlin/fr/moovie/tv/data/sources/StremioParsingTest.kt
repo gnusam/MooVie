@@ -172,4 +172,12 @@ class StremioParsingTest {
         assertEquals(900_000_000L, StremioProvider.sizeBytes("x\n👤 4 💾 900 MB ⚙️ y"))
         assertEquals(null, StremioProvider.sizeBytes("aucun poids ici"))
     }
+
+    @Test
+    fun `l'audio du fichier est annonce sur la fiche`() {
+        assertEquals("multi-audio", StremioProvider.audioOf("[QaS] FMA Brotherhood [Dual Audio]\n👤 32 ⚙️ NyaaSi | Dubbed / Dual Audio"))
+        assertEquals("multi-audio", StremioProvider.audioOf("FMA Brotherhood 1-64 [Multi-Audio][7]"))
+        assertEquals("doublé", StremioProvider.audioOf("Full Metal Alchemist [English Dubbed]\nDubbed / 🇬🇧"))
+        assertEquals(null, StremioProvider.audioOf("[Okay-Raws] Fullmetal Alchemist Brotherhood - 01 (BD 1080p)"))
+    }
 }

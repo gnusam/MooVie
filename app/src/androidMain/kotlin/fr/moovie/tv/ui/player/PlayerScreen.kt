@@ -88,6 +88,8 @@ import fr.moovie.tv.ui.player.bestDownloadStream
 import fr.moovie.tv.ui.player.resolveAlternative
 import fr.moovie.tv.ui.format.formatNowDateTime
 import fr.moovie.tv.core.player.matchAudioTrack
+import fr.moovie.tv.core.player.playerSourceLine
+import fr.moovie.tv.core.player.preferredAudioLanguages
 import fr.moovie.tv.data.intro.IntroDbRepository
 import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.moovie.tv.data.intro.IntroMedia
@@ -225,6 +227,8 @@ fun PlayerScreen(
     sourceUrl: String = "",
     hoster: String = "",
     language: String = "",
+    /** Langue originale TMDB (« ja »…) : piste audio retenue en VO. Vide = inconnue. */
+    originalLanguage: String = "",
     /** Autres sources de la même langue, pour le menu « Qualité ». */
     alternatives: List<AltSource> = emptyList(),
     onBack: () -> Unit,
@@ -519,6 +523,14 @@ fun PlayerScreen(
     LaunchedEffect(streamUrl) {
         player.stop()
         player.clearMediaItems()
+
+        // La piste audio de la langue choisie sur la fiche : un fichier « Dual
+        // Audio » marque souvent le doublage anglais par défaut, et une VO se
+        // jouait alors en anglais. Posé avant le montage pour que la première
+        // sélection soit déjà la bonne — voir preferredAudioLanguages.
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setPreferredAudioLanguages(*preferredAudioLanguages(language, originalLanguage).toTypedArray())
+            .build()
 
         val subConfigs = subtitles.mapNotNull { (lang, url) ->
             if (url.isBlank()) return@mapNotNull null
@@ -1282,7 +1294,16 @@ fun PlayerScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            PlayerTitleOverlay(title = title, subtitle = subtitle, clock = clock)
+            PlayerTitleOverlay(
+                title = title,
+                subtitle = subtitle,
+                clock = clock,
+                source = playerSourceLine(
+                    hoster = hoster,
+                    language = language,
+                    audio = tracks.audio.firstOrNull { it.selected }?.label.orEmpty(),
+                ),
+            )
             ReportMarkingBanner(reportStep, positionMs)
         }
 
