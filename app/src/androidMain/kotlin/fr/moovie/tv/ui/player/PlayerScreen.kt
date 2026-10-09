@@ -245,6 +245,9 @@ fun PlayerScreen(
     onPlaybackFailed: () -> Unit = onBack,
 ) {
     val context = LocalContext.current
+    // Avec « lecteur : source … » juste après, l'écart sépare la navigation
+    // (fiche -> lecteur) de la construction du lecteur lui-même.
+    remember(streamUrl) { Chrono.repere("lecteur : écran composé") }
     // Lu une fois : `isTouchUi` est un CompositionLocal, illisible depuis un
     // LaunchedEffect.
     val touchUi = isTouchUi

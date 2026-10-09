@@ -1,5 +1,6 @@
 package fr.moovie.tv.ui.details
 
+import fr.moovie.tv.shared.Chrono
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -244,6 +245,7 @@ fun DetailsScreen(
                 // Ferme le panneau avant de partir : au retour (ou sur une autre
                 // fiche, le ViewModel étant partagé), il ne doit pas rester ouvert.
                 viewModel.closePanel()
+                Chrono.repere("fiche : flux prêt, ouverture du lecteur")
                 onPlay(
                     Screen.Player(
                         streamUrl = s.url,
