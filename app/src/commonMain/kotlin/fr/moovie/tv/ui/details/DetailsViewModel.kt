@@ -1303,16 +1303,23 @@ class DetailsViewModel : ViewModel() {
             // Sautée si le lecteur vient de la refuser (rejectedLinks) ; oubliée
             // si elle ne répond plus. Voir LastSourceRepository.
             lastSource.get(playbackKey)?.takeIf { it.url !in rejectedLinks }?.let { souvenir ->
+                Chrono.repere("lecture : source mémorisée (${souvenir.hoster}), réessai direct")
                 _quickPlay.value = QuickPlayState.Searching(hosterLabel(souvenir), hoster = hosterLabel(souvenir))
+                val chronoResolution = Chrono.debut("lecture : résolution ${souvenir.hoster}")
                 val stream = runCatching { ExtractorRegistry.resolve(souvenir) }.getOrNull()
+                chronoResolution.fin()
                 if (gen != resolveGen) return@launch
-                if (stream != null && stream.url.isNotBlank() && isStreamPlayable(stream, playbackMinutes)) {
+                val chronoSonde = Chrono.debut("lecture : sonde du flux")
+                val jouable = stream != null && stream.url.isNotBlank() && isStreamPlayable(stream, playbackMinutes)
+                chronoSonde.fin(if (jouable) "ok" else "refusé")
+                if (jouable && stream != null) {
                     registerUnlessCast(pendingMeta)
                     playingLink = souvenir
                     _quickPlay.value = QuickPlayState.Idle
                     livre(stream)
                     return@launch
                 }
+                Chrono.repere("lecture : source mémorisée morte, retour à la cascade")
                 lastSource.forget(playbackKey)
             }
             val lang = settings.streamLanguage.first().name
@@ -1344,7 +1351,9 @@ class DetailsViewModel : ViewModel() {
                     // visible au lieu de laisser l'utilisateur devant un écran
                     // d'attente muet.
                     _quickPlay.value = QuickPlayState.Searching(hosterLabel(next), hoster = hosterLabel(next))
+                    val chronoResolution = Chrono.debut("lecture : résolution ${next.hoster}")
                     val stream = runCatching { ExtractorRegistry.resolve(next) }.getOrNull()
+                    chronoResolution.fin()
                     if (gen != resolveGen) return@launch // titre changé entre-temps
                     // Une URL extraite ne suffit pas : ces hébergeurs signent des
                     // liens à durée de vie courte et répondent 403 derrière. Sans

@@ -58,6 +58,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -283,6 +284,21 @@ fun PlayerScreen(
             )
             .setSeekBackIncrementMs(PLAYER_SEEK_STEP_MS)
             .setSeekForwardIncrementMs(PLAYER_SEEK_STEP_MS)
+            // Démarre avec 1,5 s de média en tampon au lieu des 2,5 s par
+            // défaut, 3 s après un rebuffering au lieu de 5. Mesuré le
+            // 09/10/2026 : 2,5 à 5,5 s entre le montage du flux et la première
+            // image, dont le temps à remplir ce tampon. Le reste du tampon
+            // (50 s) ne change pas : c'est lui qui absorbe le Wi-Fi.
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                        DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                        PLAYER_BUFFER_FOR_PLAYBACK_MS,
+                        PLAYER_BUFFER_AFTER_REBUFFER_MS,
+                    )
+                    .build(),
+            )
             // Garde CPU + Wi-Fi éveillés pendant la lecture (évite les coupures
             // de flux quand le réseau se met en veille).
             .setWakeMode(C.WAKE_MODE_NETWORK)
@@ -324,6 +340,7 @@ fun PlayerScreen(
 
     /** Vue du lecteur exposée à la chrome partagée. */
     val controller = remember { ExoPlayerController(player) }
+    remember { Chrono.repere("lecteur : ExoPlayer construit") }
 
     // Instant du dernier chargement de sous-titre externe.
     //
@@ -342,6 +359,7 @@ fun PlayerScreen(
     // pas l'ExoPlayer nu — sinon le volet n'offre qu'une flèche gauche.
     val sessionPlayer = remember(player) { EpisodePlayer(player) }
     val mediaSession = remember { MediaSession.Builder(context, sessionPlayer).build() }
+    remember { Chrono.repere("lecteur : session média construite") }
 
     // Surface vidéo seule : le contrôleur intégré est remplacé par l'overlay
     // Compose, et la vue ne doit pas capter le focus du D-pad.
@@ -1716,3 +1734,7 @@ private fun ExoPlayer.videoHeights(): List<Int> = runCatching {
         .distinct()
         .sortedDescending()
 }.getOrDefault(emptyList())
+
+/** Tampon exigé avant la première image, et après un rebuffering (voir le LoadControl). */
+private const val PLAYER_BUFFER_FOR_PLAYBACK_MS = 1_500
+private const val PLAYER_BUFFER_AFTER_REBUFFER_MS = 3_000

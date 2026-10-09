@@ -1,5 +1,7 @@
 package fr.moovie.tv.ui.details
 
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material3.LocalContentColor
 import fr.moovie.tv.shared.formaterDecimal
 import androidx.compose.animation.AnimatedVisibility
@@ -1793,15 +1795,30 @@ fun DetailsScreenContent(
                                     stringResource(Res.string.details_episodes_season, s.season),
                                     style = MaterialTheme.typography.titleMedium,
                                 )
-                                // Composés tous à la fois, et non
-                                // paresseusement : la page entière défile
-                                // désormais, et une liste paresseuse à
-                                // hauteur infinie dans un défilement
-                                // vertical n'est pas mesurable. Une saison
-                                // en compte vingt-cinq au pire — c'est le
-                                // prix du défilement continu qu'exige la
-                                // maquette, et il se paie une fois.
-                                s.episodes.forEachIndexed { index, ep ->
+                                // Pas de liste paresseuse : la page entière
+                                // défile, et une liste à hauteur infinie dans
+                                // un défilement vertical n'est pas mesurable.
+                                // Mais pas tout d'un coup non plus : une saison
+                                // de 51 épisodes gelait le fil principal 7 s
+                                // sur la TV (mesuré le 09/10/2026, build
+                                // debug). Les lignes arrivent par paquets, une
+                                // image après l'autre ; le premier paquet va
+                                // jusqu'à l'épisode à reprendre, dont le focus
+                                // est demandé dès que la fiche est prête.
+                                val premierPaquet = maxOf(
+                                    EPISODES_PAR_PAQUET,
+                                    s.episodes.indexOfFirst { it.episodeNumber == s.resumeEpisode } + 1,
+                                )
+                                var composes by remember(s.season, s.episodes.size) {
+                                    mutableIntStateOf(premierPaquet)
+                                }
+                                LaunchedEffect(s.season, s.episodes.size) {
+                                    while (composes < s.episodes.size) {
+                                        withFrameNanos { }
+                                        composes += EPISODES_PAR_PAQUET
+                                    }
+                                }
+                                s.episodes.take(composes).forEachIndexed { index, ep ->
                                     ligneEpisode(index, ep)
                                 }
                             }
@@ -3530,3 +3547,6 @@ private fun CastRow(cast: List<CastMember>, hPad: Dp, onOpenPerson: (CastMember)
         }
     }
 }
+
+/** Lignes d'épisodes composées par image, sur la fiche d'une série. */
+private const val EPISODES_PAR_PAQUET = 4
