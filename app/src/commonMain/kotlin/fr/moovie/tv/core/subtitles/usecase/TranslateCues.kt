@@ -1,5 +1,12 @@
 package fr.moovie.tv.core.subtitles.usecase
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import fr.moovie.tv.core.subtitles.port.SubtitleTranslator
 
 /**
@@ -38,22 +45,36 @@ suspend fun translateCues(
     cues: List<SrtCue>,
     translator: SubtitleTranslator,
     batchSize: Int = BATCH_PAR_DEFAUT,
+    parallelism: Int = 1,
     onProgress: suspend (cues: List<SrtCue>, done: Int) -> Unit = { _, _ -> },
 ): List<SrtCue> {
     if (cues.isEmpty()) return cues
     val taille = batchSize.coerceAtLeast(1)
     val sortie = cues.toMutableList()
+    val bornes = (cues.indices step taille).map { it to minOf(it + taille, cues.size) }
 
-    var i = 0
-    while (i < sortie.size) {
-        val fin = minOf(i + taille, sortie.size)
-        val lot = sortie.subList(i, fin)
-        val traduits = translateBatch(lot.map { it.text }, translator)
-        for ((j, texte) in traduits.withIndex()) {
-            sortie[i + j] = sortie[i + j].copy(lines = texte.split('\n'))
-        }
-        i = fin
-        onProgress(sortie.toList(), i)
+    // Plusieurs lots en vol : un lot attend surtout la réponse du modèle, pas
+    // la machine. Lancés dans l'ordre du film, les premiers finissent en
+    // premier ; chaque lot fini publie quand même un fichier entier, et
+    // `done` compte les répliques faites, quel que soit l'ordre d'arrivée.
+    val verrou = Mutex()
+    val permis = Semaphore(parallelism.coerceAtLeast(1))
+    var faites = 0
+    coroutineScope {
+        bornes.map { (debut, fin) ->
+            async {
+                val traduits = permis.withPermit {
+                    translateBatch(cues.subList(debut, fin).map { it.text }, translator)
+                }
+                verrou.withLock {
+                    for ((j, texte) in traduits.withIndex()) {
+                        sortie[debut + j] = sortie[debut + j].copy(lines = texte.split('\n'))
+                    }
+                    faites += fin - debut
+                    onProgress(sortie.toList(), faites)
+                }
+            }
+        }.awaitAll()
     }
     return sortie
 }

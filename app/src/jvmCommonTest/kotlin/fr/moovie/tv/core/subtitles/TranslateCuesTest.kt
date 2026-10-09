@@ -129,4 +129,17 @@ class TranslateCuesTest {
         }
         assertEquals(listOf(1, 2, 3), etapes)
     }
+
+    @Test
+    fun `des lots en parallele rendent le meme fichier, dans l'ordre`() = runBlocking {
+        val sequentiel = translateCues(parseSrt(srt), fidele, batchSize = 1)
+        val etapes = mutableListOf<Int>()
+        val parallele = translateCues(parseSrt(srt), fidele, batchSize = 1, parallelism = 3) { cues, faites ->
+            assertEquals(3, cues.size, "le fichier publie doit rester entier")
+            etapes += faites
+        }
+        assertEquals(sequentiel.map { it.text }, parallele.map { it.text })
+        assertEquals(sequentiel.map { it.stamps }, parallele.map { it.stamps })
+        assertEquals(listOf(1, 2, 3), etapes)
+    }
 }

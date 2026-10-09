@@ -228,11 +228,20 @@ class PlayerSubtitlesViewModel : ViewModel() {
         if (cues.isEmpty()) return
         _state.value = _state.value.copy(translated = 0 to cues.size)
 
-        val traduits = translateCues(cues, translator) { partiel, faites ->
+        // Le compteur avance à chaque lot, mais le lecteur ne recharge le
+        // fichier qu'au premier lot puis toutes les RECHARGE_MS au plus : un
+        // sous-titre externe remonte le flux, et avec des lots parallèles neuf
+        // rechargements tombaient en vingt secondes.
+        var publieA = 0L
+        val traduits = translateCues(cues, translator, parallelism = LOTS_EN_VOL) { partiel, faites ->
             val fichier = files.storeTranslated(mediaKey, candidate, renderSrt(partiel))
             original = fichier
             _state.value = _state.value.copy(translated = faites to cues.size)
-            publish(_state.value.timing)
+            val maintenant = maintenantMs()
+            if (publieA == 0L || maintenant - publieA >= RECHARGE_MS) {
+                publieA = maintenant
+                publish(_state.value.timing)
+            }
         }
         original = files.storeTranslated(mediaKey, candidate, renderSrt(traduits))
         _state.value = _state.value.copy(translated = null)
@@ -328,6 +337,14 @@ class PlayerSubtitlesViewModel : ViewModel() {
         // que `File.absolutePath` rendait déjà : le lecteur reçoit la même
         // chaîne qu'avant.
         _file.value = files.retimed(source, timing).toString()
+    }
+
+    private companion object {
+        /** Lots traduits en même temps : mesuré à ~5 s le lot de 40 sur Haiku. */
+        const val LOTS_EN_VOL = 3
+
+        /** Écart minimal entre deux rechargements du fichier dans le lecteur. */
+        const val RECHARGE_MS = 20_000L
     }
 
     private fun io(block: suspend () -> Unit) {

@@ -2,6 +2,7 @@ package fr.moovie.tv.data.subtitles
 
 import fr.moovie.tv.core.subtitles.port.SubtitleTranslator
 import fr.moovie.tv.data.net.clientRest
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -49,14 +50,17 @@ import kotlinx.serialization.json.putJsonObject
  *
  * `effort: low` — traduire n'est pas raisonner. C'est un travail de volume, à
  * mille répliques par film, et le palier bas est celui que la documentation
- * recommande pour ce genre de route. Le modèle, lui, reste le plus capable :
- * baisser le modèle pour économiser serait un choix qui appartient à
- * l'utilisateur, pas à ce fichier.
+ * recommande pour ce genre de route.
  *
- * `fallbacks` — un refus du classificateur rend un HTTP 200 avec
- * `stop_reason: "refusal"`, et sans repli la requête s'arrête là. Un dialogue de
- * film peut être violent ou cru sans que sa traduction pose le moindre problème :
- * le repli évite qu'une scène difficile éteigne les sous-titres du reste.
+ * Modèle : **Haiku**, choix de Sam le 09/10/2026 (« des modèles plus légers et
+ * suffisants pour traduire »). Mesuré sur 40 vraies répliques de Fullmetal
+ * Alchemist : Opus 5 11,8 s, Sonnet 5.5 8,1 s, Haiku 5.5 5,5 s, pour une
+ * traduction correcte, un rien plus littérale. La vitesse compte plus que la
+ * nuance : c'est elle qui décide si le français arrive avant la réplique.
+ *
+ * Pas de `fallbacks` : Haiku n'a pas de repli serveur sur refus. Un lot refusé
+ * rend null, la bissection le recoupe, et une réplique qui résiste garde son
+ * texte anglais — un défaut local, jamais un fichier éteint.
  */
 class ClaudeSubtitleTranslator(
     private val apiKey: String = TraductionConfig.ANTHROPIC_API_KEY,
@@ -73,9 +77,17 @@ class ClaudeSubtitleTranslator(
 
         val reponse = runCatching {
             clientRest.post(URL) {
+                // Mesuré le 09/10/2026 : 12,2 s pour un lot de 40 répliques.
+                // Le délai de lecture par défaut d'OkHttp (10 s) coupait chaque
+                // lot ; la bissection les recoupait jusqu'à l'unité, et la
+                // traduction restait figée à « 0 sur 333 », sans un mot dans
+                // les journaux puisque l'échec rend null.
+                timeout {
+                    requestTimeoutMillis = DELAI_MS
+                    socketTimeoutMillis = DELAI_MS
+                }
                 header("x-api-key", apiKey)
                 header("anthropic-version", VERSION)
-                header("anthropic-beta", BETA_REPLI)
                 contentType(ContentType.Application.Json)
                 setBody(corps(textes).toString())
             }.bodyAsText()
@@ -94,9 +106,6 @@ class ClaudeSubtitleTranslator(
                 put("schema", schema(textes.size))
             }
         }
-        // Forme courte du repli : le serveur route selon la catégorie du refus,
-        // il n'y a aucune liste de modèles à tenir à jour.
-        put("fallbacks", "default")
         putJsonArray("messages") {
             add(
                 buildJsonObject {
@@ -185,14 +194,10 @@ class ClaudeSubtitleTranslator(
         const val URL = "https://api.anthropic.com/v1/messages"
         const val VERSION = "2023-06-01"
 
-        /** Repli serveur sur refus du classificateur, forme « default ». */
-        const val BETA_REPLI = "server-side-fallback-2026-07-01"
+        /** Un lot entier, réponse comprise : large devant les 12 s mesurées. */
+        const val DELAI_MS = 180_000L
 
-        /**
-         * Le modèle le plus capable. Traduire un dialogue demande de rendre un
-         * registre, une ironie, un tutoiement — c'est là que se joue la
-         * différence entre un sous-titre qu'on oublie et un sous-titre qui gêne.
-         */
-        const val MODELE = "claude-opus-5"
+        /** Le Haiku courant : voir la documentation de la classe. */
+        const val MODELE = "claude-haiku-5-5"
     }
 }
