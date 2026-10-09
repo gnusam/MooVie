@@ -132,6 +132,11 @@ class SubtitleFileStore(
     }
 
     /** Sous-titre déjà téléchargé pour ce média et ce candidat, s'il existe. */
+    /** La traduction déjà faite de ce sous-titre, si elle est sur disque : elle survit à la sortie du lecteur, contrairement aux versions recalées. */
+    fun existingTranslated(mediaKey: String, candidate: SubtitleCandidate): Path? =
+        (dir / "${safe(mediaKey)}_${safe(candidate.fileId)}_trad.srt")
+            .takeIf { fs.metadataOrNull(it)?.isRegularFile == true }
+
     fun existing(mediaKey: String, candidate: SubtitleCandidate): Path? =
         (dir / "${safe(mediaKey)}_${candidate.fileId}.srt")
             .takeIf { fs.metadataOrNull(it)?.isRegularFile == true }

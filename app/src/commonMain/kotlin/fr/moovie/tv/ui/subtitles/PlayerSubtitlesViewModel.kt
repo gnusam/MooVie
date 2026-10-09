@@ -1,5 +1,6 @@
 package fr.moovie.tv.ui.subtitles
 
+import fr.moovie.tv.data.subtitles.SubtitleChoiceRepository
 import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.shared.dispatcherEs
 import fr.moovie.tv.shared.maintenantMs
@@ -96,6 +97,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
     private val catalog: SubtitleCatalog =
         ChainedSubtitleCatalog(listOf(OpenSubtitlesCatalog(api), StremioSubtitleCatalog()))
     private val files = SubtitleFileStore()
+    private val choix = SubtitleChoiceRepository()
 
     /**
      * Traducteur à la demande. Inerte sans clé d'API — voir [TraductionConfig] —
@@ -198,10 +200,31 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * été téléchargé pour ce média.
      */
     fun pick(candidate: SubtitleCandidate) = io {
-        // Un choix manuel d'un sous-titre qui n'est pas en français se traduit
-        // aussi : Sam, 09/10/2026, « est-ce que ça va me le traduire au bout
-        // d'un moment ou rester bloqué en anglais éternellement ? ».
-        if (activate(candidate) && candidate.language != "fr") translateActive()
+        // Retenu avant même d'être activé : c'est le geste qui compte, et il
+        // doit survivre à la sortie du lecteur. Voir SubtitleChoiceRepository.
+        choix.remember(mediaKey, candidate)
+        Chrono.repere("sous-titres : choix manuel ${candidate.language} ${candidate.fileId} retenu pour $mediaKey")
+        activerEtTraduire(candidate)
+    }
+
+    /**
+     * Active un sous-titre et, s'il n'est pas en français, le traduit — ou
+     * ressert la traduction déjà faite, qui est restée sur disque : chaque
+     * reprise retraduisait l'épisode entier (377 répliques, 20 s, un appel
+     * d'API par lot) pour un résultat identique.
+     */
+    private suspend fun activerEtTraduire(candidate: SubtitleCandidate) {
+        if (!activate(candidate)) return
+        if (candidate.language == "fr") return
+        val deja = files.existingTranslated(mediaKey, candidate)
+        if (deja != null) {
+            original = deja
+            _state.value = _state.value.copy(translated = null, translatedDone = true)
+            Chrono.repere("sous-titres : traduction réutilisée $deja")
+            publish(_state.value.timing)
+            return
+        }
+        translateActive()
     }
 
     /** Rend false quand le quota a refusé le téléchargement. */
@@ -305,6 +328,21 @@ class PlayerSubtitlesViewModel : ViewModel() {
             Chrono.repere("sous-titres : auto $mediaKey, déjà actif ${_state.value.active?.fileId}, rien à faire")
             return@io
         }
+        // Le choix de l'utilisateur sur ce titre passe avant toute recherche.
+        when (val souvenir = choix.get(mediaKey)) {
+            is SubtitleChoiceRepository.Remembered.Off -> {
+                Chrono.repere("sous-titres : auto $mediaKey, coupés par l'utilisateur, rien à faire")
+                return@io
+            }
+            is SubtitleChoiceRepository.Remembered.Candidate -> {
+                Chrono.repere("sous-titres : auto $mediaKey, choix retenu ${souvenir.candidate.language} ${souvenir.candidate.fileId}")
+                if (this.mediaKey != mediaKey) { enter(mediaKey); this.mediaKey = mediaKey }
+                activerEtTraduire(souvenir.candidate)
+                if (_state.value.active != null) return@io
+                Chrono.repere("sous-titres : choix retenu introuvable, recherche normale")
+            }
+            null -> Unit
+        }
         if (_state.value.candidates.isEmpty() || this.mediaKey != mediaKey) {
             search(mediaKey, title, streamFps, episodeTitle)
         }
@@ -316,8 +354,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
             return@io
         }
         Chrono.repere("sous-titres : auto $mediaKey, choisi ${choisi.language} ${choisi.fileId}")
-        if (!activate(choisi)) return@io
-        if (choisi.language != "fr") translateActive()
+        activerEtTraduire(choisi)
     }
 
     /** Décale le sous-titre, en relatif. */
@@ -335,6 +372,8 @@ class PlayerSubtitlesViewModel : ViewModel() {
 
     /** Retire le sous-titre externe sans oublier ce qui a été téléchargé. */
     fun clear() {
+        // « Désactivés » est un choix comme un autre : retenu pour ce titre.
+        viewModelScope.launch { choix.rememberOff(mediaKey) }
         original = null
         _state.value = _state.value.copy(active = null, timing = SubtitleTiming.None)
         _file.value = null
