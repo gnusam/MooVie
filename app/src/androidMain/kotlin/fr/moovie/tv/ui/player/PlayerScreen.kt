@@ -985,6 +985,11 @@ fun PlayerScreen(
     // Version à afficher sur la pastille, ou null s'il n'y a rien à montrer :
     // porter la non-nullité dans la valeur évite de la revérifier plus bas.
     val subsViewModel: PlayerSubtitlesViewModel = viewModel()
+    // **Pendant la composition, avant de lire `file`** : un effet arriverait
+    // après que le fichier de l'épisode précédent a déjà été chargé dans ce
+    // lecteur neuf, puisque le ViewModel survit à la navigation. Voir
+    // PlayerSubtitlesViewModel.enter.
+    remember(mediaKey) { subsViewModel.enter(mediaKey) }
     val subsState by subsViewModel.state.collectAsStateWithLifecycle()
     val subsFile by subsViewModel.file.collectAsStateWithLifecycle()
     // Le fichier arrive déjà recalé : le lecteur n'a qu'à le charger.
@@ -1003,8 +1008,6 @@ fun PlayerScreen(
         controller.loadExternalSubtitle(subsFile)
     }
     DisposableEffect(Unit) { onDispose { subsViewModel.onLeave() } }
-    // Nouveau média, même ViewModel : voir PlayerSubtitlesViewModel.enter.
-    LaunchedEffect(mediaKey) { subsViewModel.enter(mediaKey) }
 
     // Sous-titres français d'office sur une VO, au premier passage en lecture :
     // le flux est alors monté, sa cadence connue, et activer un sous-titre
