@@ -954,6 +954,17 @@ fun PlayerScreen(
     }
     DisposableEffect(Unit) { onDispose { subsViewModel.onLeave() } }
 
+    // Sous-titres français d'office sur une VO, au premier passage en lecture :
+    // le flux est alors monté, sa cadence connue, et activer un sous-titre
+    // externe (qui remonte le média) ne casse pas un démarrage en cours. Pas en
+    // VOSTFR, déjà sous-titrée à l'image, ni en VF. Voir autoFrench.
+    var autoSubsDone by remember(streamUrl) { mutableStateOf(false) }
+    LaunchedEffect(isPlaying) {
+        if (autoSubsDone || !isPlaying || !language.equals("VO", ignoreCase = true)) return@LaunchedEffect
+        autoSubsDone = true
+        subsViewModel.autoFrench(mediaKey, title, controller.videoFps())
+    }
+
     val chipVersion = updateVersion?.takeIf { updateChipFresh || controlsVisible }
 
     // Veille : uniquement sur une lecture en pause, et repoussée à chaque appui

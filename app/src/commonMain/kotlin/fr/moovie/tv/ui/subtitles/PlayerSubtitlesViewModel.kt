@@ -124,12 +124,14 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * Cherche les sous-titres du média en cours. [title] sert de repli quand la
      * clé de lecture ne porte pas d'identifiant TMDB exploitable.
      */
-    fun load(mediaKey: String, title: String, streamFps: Double) = io {
-        if (!_state.value.available) return@io
+    fun load(mediaKey: String, title: String, streamFps: Double) = io { search(mediaKey, title, streamFps) }
+
+    private suspend fun search(mediaKey: String, title: String, streamFps: Double) {
+        if (!_state.value.available) return
         this.mediaKey = mediaKey
         this.streamFps = streamFps.takeIf { it > 0 }
 
-        val id = parseMediaKey(mediaKey) ?: return@io
+        val id = parseMediaKey(mediaKey) ?: return
         val media = if (id.isTv) {
             MediaRef.Episode(id.tmdbId, title, season = id.season, episode = id.episode)
         } else {
@@ -165,7 +167,10 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * Active un sous-titre. Ne consomme le quota que si le fichier n'a pas déjà
      * été téléchargé pour ce média.
      */
-    fun pick(candidate: SubtitleCandidate) = io {
+    fun pick(candidate: SubtitleCandidate) = io { activate(candidate) }
+
+    /** Rend false quand le quota a refusé le téléchargement. */
+    private suspend fun activate(candidate: SubtitleCandidate): Boolean {
         val cached = files.existing(mediaKey, candidate)
         val source = cached ?: run {
             _state.value = _state.value.copy(loading = true, trouble = null)
@@ -176,7 +181,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
                     trouble = SubtitleTrouble.QUOTA,
                     quota = catalog.quota(),
                 )
-                return@io
+                return false
             }
             _state.value = _state.value.copy(quota = downloaded.quota)
             files.storeOriginal(mediaKey, candidate, downloaded.content)
@@ -197,6 +202,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
             downloaded = files.storedIds(mediaKey),
         )
         publish(timing)
+        return true
     }
 
     /**
@@ -211,13 +217,15 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * à côté : sans ça, la deuxième passe traduirait du français vers du
      * français.
      */
-    fun translate() = io {
-        val candidate = _state.value.active ?: return@io
-        val source = original ?: return@io
-        if (!translator.configured || _state.value.translated != null) return@io
+    fun translate() = io { translateActive() }
 
-        val cues = parseSrt(files.read(source) ?: return@io)
-        if (cues.isEmpty()) return@io
+    private suspend fun translateActive() {
+        val candidate = _state.value.active ?: return
+        val source = original ?: return
+        if (!translator.configured || _state.value.translated != null) return
+
+        val cues = parseSrt(files.read(source) ?: return)
+        if (cues.isEmpty()) return
         _state.value = _state.value.copy(translated = 0 to cues.size)
 
         val traduits = translateCues(cues, translator) { partiel, faites ->
@@ -229,6 +237,33 @@ class PlayerSubtitlesViewModel : ViewModel() {
         original = files.storeTranslated(mediaKey, candidate, renderSrt(traduits))
         _state.value = _state.value.copy(translated = null)
         publish(_state.value.timing)
+    }
+
+    /**
+     * Des sous-titres français sans rien demander, pour une lecture en VO.
+     *
+     * Sam, 09/10/2026 : « priorité sur les sous-titres en français ». Le menu
+     * savait déjà chercher, activer et traduire, mais à la main : une VO
+     * démarrait sur la piste anglaise intégrée au fichier. Ici, au lancement :
+     * un sous-titre français s'il en existe un, sinon le meilleur anglais
+     * aussitôt traduit — par le début, ce qu'on regarde. Fullmetal Alchemist
+     * (2003) n'a aucun sous-titre français, ni sur OpenSubtitles ni sur
+     * l'addon : sans la traduction, il n'y avait rien à proposer.
+     *
+     * Ne fait rien si un sous-titre est déjà actif : un choix fait dans le
+     * menu, ou une reprise, ne se fait pas écraser.
+     */
+    fun autoFrench(mediaKey: String, title: String, streamFps: Double) = io {
+        if (_state.value.active != null) return@io
+        if (_state.value.candidates.isEmpty() || this.mediaKey != mediaKey) {
+            search(mediaKey, title, streamFps)
+        }
+        val candidates = _state.value.candidates
+        val choisi = candidates.firstOrNull { it.language == "fr" }
+            ?: candidates.firstOrNull { it.language == "en" }.takeIf { translator.configured }
+            ?: return@io
+        if (!activate(choisi)) return@io
+        if (choisi.language != "fr") translateActive()
     }
 
     /** Décale le sous-titre, en relatif. */
