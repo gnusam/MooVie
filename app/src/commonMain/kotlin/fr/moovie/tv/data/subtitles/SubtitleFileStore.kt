@@ -84,7 +84,11 @@ class SubtitleFileStore(
      * lui-même — inutile de recopier 46 Ko pour ne rien changer.
      */
     fun retimed(original: Path, timing: SubtitleTiming): Path {
-        if (timing.isIdentity) return original
+        // Toujours un fichier **neuf**, même sans recalage. Le chemin publié
+        // est un StateFlow : republier le même chemin n'émet rien, et le
+        // lecteur ne rechargeait jamais la traduction — mesuré le 09/10/2026,
+        // « 0 sur 333 » jusqu'à « 333 sur 333 » et pas une ligne de français à
+        // l'écran, le fichier _trad.srt étant réécrit sous le même nom.
         fs.createDirectories(dir)
         version++
         val sortie = dir / "${original.name.substringBeforeLast('.')}_v$version.srt"

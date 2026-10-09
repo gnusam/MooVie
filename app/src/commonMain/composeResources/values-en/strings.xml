@@ -383,6 +383,8 @@
     <string name="player_online_subtitles">Online subtitles</string>
     <string name="player_subtitles_translate_title">Translation</string>
     <string name="player_subtitles_translate">Translate into French</string>
+    <string name="player_subtitles_translated">Translated to French</string>
+    <string name="player_subtitles_translating_short">Translating</string>
     <string name="player_subtitles_translating">Translating… %1$d / %2$d lines</string>
     <string name="player_subtitles_searching">Searching…</string>
     <string name="player_subtitles_none_found">No subtitles found for this title.</string>

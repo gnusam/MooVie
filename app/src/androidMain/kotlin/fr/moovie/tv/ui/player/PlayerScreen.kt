@@ -88,6 +88,7 @@ import fr.moovie.tv.ui.player.bestDownloadStream
 import fr.moovie.tv.ui.player.resolveAlternative
 import fr.moovie.tv.ui.format.formatNowDateTime
 import fr.moovie.tv.core.player.matchAudioTrack
+import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.core.player.playerSourceLine
 import fr.moovie.tv.core.player.preferredAudioLanguages
 import fr.moovie.tv.data.intro.IntroDbRepository
@@ -448,6 +449,9 @@ fun PlayerScreen(
     // Fin du tampon Media3, pour la piste de chargement de la barre.
     var bufferedMs by remember { mutableLongStateOf(0L) }
     var tracks by remember { mutableStateOf(PlayerTracks()) }
+    // Chronométrage du démarrage de la lecture : voir Chrono.
+    var chronoLecteur by remember { mutableStateOf<Chrono.Mesure?>(null) }
+    var chronoPret by remember { mutableStateOf<Chrono.Mesure?>(null) }
     var speed by remember { mutableStateOf(1f) }
     var controlsVisible by remember { mutableStateOf(true) }
     // Horloge du bandeau. Rafraîchie à la minute, et seulement quand les
@@ -521,6 +525,8 @@ fun PlayerScreen(
 
     // Prépare le média (avec sous-titres externes) et reprend à la position sauvée.
     LaunchedEffect(streamUrl) {
+        chronoLecteur = Chrono.debut("lecteur : du montage du flux à la première image")
+        chronoPret = Chrono.debut("lecteur : du montage du flux à l'état prêt")
         player.stop()
         player.clearMediaItems()
 
@@ -528,8 +534,10 @@ fun PlayerScreen(
         // Audio » marque souvent le doublage anglais par défaut, et une VO se
         // jouait alors en anglais. Posé avant le montage pour que la première
         // sélection soit déjà la bonne — voir preferredAudioLanguages.
+        val voulues = preferredAudioLanguages(language, originalLanguage)
+        Chrono.repere("lecteur : source $hoster, langue « $language », originale « $originalLanguage », audio préféré $voulues")
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setPreferredAudioLanguages(*preferredAudioLanguages(language, originalLanguage).toTypedArray())
+            .setPreferredAudioLanguages(*voulues.toTypedArray())
             .build()
 
         val subConfigs = subtitles.mapNotNull { (lang, url) ->
@@ -836,9 +844,30 @@ fun PlayerScreen(
 
             override fun onTracksChanged(newTracks: Tracks) {
                 tracks = controller.tracks()
+                // Toutes les pistes audio du fichier, décodables ou non : c'est
+                // ce qui dit pourquoi le menu Audio n'en propose qu'une.
+                newTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEach { g ->
+                    for (i in 0 until g.length) {
+                        val f = g.getTrackFormat(i)
+                        Chrono.repere(
+                            "lecteur : piste audio langue=${f.language} « ${f.label.orEmpty()} » " +
+                                "${f.sampleMimeType} ${f.channelCount} canaux " +
+                                "décodable=${g.isTrackSupported(i)} choisie=${g.isTrackSelected(i)}",
+                        )
+                    }
+                }
+            }
+
+            override fun onRenderedFirstFrame() {
+                chronoLecteur?.fin()
+                chronoLecteur = null
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    chronoPret?.fin()
+                    chronoPret = null
+                }
                 if (playbackState == Player.STATE_ENDED) ended = true
             }
 
@@ -953,6 +982,8 @@ fun PlayerScreen(
         controller.loadExternalSubtitle(subsFile)
     }
     DisposableEffect(Unit) { onDispose { subsViewModel.onLeave() } }
+    // Nouveau média, même ViewModel : voir PlayerSubtitlesViewModel.enter.
+    LaunchedEffect(mediaKey) { subsViewModel.enter(mediaKey) }
 
     // Sous-titres français d'office sur une VO, au premier passage en lecture :
     // le flux est alors monté, sa cadence connue, et activer un sous-titre
@@ -1555,7 +1586,7 @@ fun PlayerScreen(
         // Elle est gratuite, mais inutile tant que personne ne la demande — et à
         // ce moment-là le flux est prêt, donc sa cadence est connue.
         LaunchedEffect(dialog) {
-            if (dialog == PlayerDialogKind.SUBTITLES && subsState.candidates.isEmpty()) {
+            if (dialog == PlayerDialogKind.SUBTITLES) {
                 subsViewModel.load(mediaKey, title, controller.videoFps())
             }
         }

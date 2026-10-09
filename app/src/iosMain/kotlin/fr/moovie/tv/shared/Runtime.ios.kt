@@ -163,3 +163,5 @@ actual fun fabriqueParDefaut(): androidx.lifecycle.ViewModelProvider.Factory =
                 "comme dans `viewModel { HomeViewModel() }`.",
         )
     }
+
+actual fun journalChrono(ligne: String) = println("MoovieChrono $ligne")

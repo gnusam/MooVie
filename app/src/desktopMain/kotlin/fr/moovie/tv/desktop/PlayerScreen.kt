@@ -1187,6 +1187,8 @@ internal fun DesktopPlayerScreen(
         // Le fichier arrive déjà recalé : le lecteur n'a rien à calculer.
         LaunchedEffect(subsFile) { controller.loadExternalSubtitle(subsFile) }
         DisposableEffect(Unit) { onDispose { subsViewModel.onLeave() } }
+    // Nouveau média, même ViewModel : voir PlayerSubtitlesViewModel.enter.
+    LaunchedEffect(mediaKey) { subsViewModel.enter(mediaKey) }
 
         // Changement d'épisode sans quitter le lecteur : ce ViewModel reste
         // monté avec lui, et il porte l'état d'un média précis. Sans cette
@@ -1209,7 +1211,7 @@ internal fun DesktopPlayerScreen(
         // est gratuite, mais inutile tant que personne ne la demande — et à ce
         // moment-là le flux est prêt, donc sa cadence est connue.
         LaunchedEffect(dialog) {
-            if (dialog == PlayerDialogKind.SUBTITLES && subsState.candidates.isEmpty()) {
+            if (dialog == PlayerDialogKind.SUBTITLES) {
                 subsViewModel.load(mediaKey, title, controller.videoFps())
             }
         }

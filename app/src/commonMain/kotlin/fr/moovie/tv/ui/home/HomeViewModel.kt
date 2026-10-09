@@ -1,5 +1,6 @@
 package fr.moovie.tv.ui.home
 
+import fr.moovie.tv.shared.Chrono
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import fr.moovie.tv.data.home.HomeLayoutEntry
@@ -167,12 +168,18 @@ class HomeViewModel : ViewModel() {
      */
     private suspend fun loadSlots(apiKey: String, layout: List<HomeLayoutEntry>) {
         _state.value = HomeState.Loading
+        val chrono = Chrono.debut("accueil : toutes les rangées")
         val repo = TmdbRepository(currentTmdbLanguage())
         var failure: Throwable? = null
 
         val slots = coroutineScope {
             layout.filter { it.visible }
-                .map { entry -> async { slotFor(entry, repo, apiKey) { failure = failure ?: it } } }
+                .map { entry ->
+                    async {
+                        val rangee = Chrono.debut("accueil : rangée ${entry.kind}${entry.genre?.let { " " + it.name }.orEmpty()}")
+                        slotFor(entry, repo, apiKey) { failure = failure ?: it }.also { rangee.fin() }
+                    }
+                }
                 .awaitAll()
                 .filterNotNull()
         }
@@ -181,6 +188,7 @@ class HomeViewModel : ViewModel() {
         // contenu n'étant pas connu ici — c'est l'écran qui les écarte s'il n'a
         // rien à y mettre.
         val kept = slots.filterNot { it is HomeSlot.Catalog && it.row.items.isEmpty() }
+        chrono.fin("${kept.size} rangées")
 
         _state.value = when {
             kept.any { it is HomeSlot.Catalog } -> HomeState.Ready(kept)

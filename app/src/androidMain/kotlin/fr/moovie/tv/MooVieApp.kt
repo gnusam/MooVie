@@ -1,5 +1,8 @@
 package fr.moovie.tv
 
+import fr.moovie.tv.shared.Chrono
+import android.os.SystemClock
+import android.os.Process
 import android.app.Application
 import android.content.Context
 import fr.moovie.tv.data.net.AppDns
@@ -29,6 +32,7 @@ class MooVieApp : Application() {
         // Contexte pour les repos jvmCommon (chemin des fichiers DataStore) :
         // posé ici, avant toute création de ViewModel.
         appContext = base
+        Chrono.repere("application : attachBaseContext")
         super.attachBaseContext(LocaleManager.wrap(base))
     }
 
@@ -47,5 +51,11 @@ class MooVieApp : Application() {
                 AppDns.configure(enabled, provider)
             }
         }
+        // L'écart entre le lancement du processus par Android et ce point dit
+        // ce qui se passe avant même notre code (chargement des classes, dex).
+        Chrono.repere(
+            "application : onCreate fini, processus lancé il y a " +
+                "${SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()} ms",
+        )
     }
 }

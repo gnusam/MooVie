@@ -1,5 +1,7 @@
 package fr.moovie.tv.ui.details
 
+import fr.moovie.tv.data.sources.LastSourceRepository
+import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.shared.dispatcherEs
 import fr.moovie.tv.shared.maintenantMs
 import androidx.lifecycle.ViewModel
@@ -354,6 +356,15 @@ class DetailsViewModel : ViewModel() {
 
     private var quickPlayJob: Job? = null
 
+    /** Du clic « Lire » au flux prêt à donner au lecteur. Voir Chrono. */
+    private var chronoLecture: Chrono.Mesure? = null
+
+    private fun livre(stream: PlayableStream) {
+        chronoLecture?.fin(playingLink?.hoster.orEmpty())
+        chronoLecture = null
+        _resolved.value = stream
+    }
+
     /**
      * Liens écartés pour le contenu en cours : sonde négative, ou lecture qui a
      * cassé une fois le lecteur ouvert. La cascade les saute au lieu de
@@ -555,6 +566,7 @@ class DetailsViewModel : ViewModel() {
         this.isTv = isTv
         resumeTarget = null
         viewModelScope.launch {
+            val chronoFiche = Chrono.debut("fiche : détails TMDB ${if (isTv) "série" else "film"} $tmdbId")
             val apiKey = settings.tmdbApiKey.first()
             if (apiKey.isBlank()) {
                 _state.value = DetailsState.Error(getString(Res.string.details_needs_key))
@@ -612,6 +624,7 @@ class DetailsViewModel : ViewModel() {
                     DetailsState.Movie(repo.movieDetails(apiKey, tmdbId))
                 }
             }.onSuccess {
+                chronoFiche.fin()
                 _state.value = it
                 // Une série mise de côté depuis une affiche du catalogue n'a pas
                 // de total d'épisodes : sans lui elle ne sortirait jamais seule
@@ -924,6 +937,7 @@ class DetailsViewModel : ViewModel() {
      * ceux qui marchent.
      */
     private val hosterTrust = HosterTrustRepository()
+    private val lastSource = LastSourceRepository()
 
     /**
      * Verdicts en mémoire, relus en continu.
@@ -993,6 +1007,7 @@ class DetailsViewModel : ViewModel() {
                 if (cached != null && cachedProviders.isNotEmpty()) {
                     if (generation != loadGeneration) return@launch
                     servedFromCache = true
+                    Chrono.repere("sources : servies depuis le cache (${cached.size} liens)")
                     _sources.value = SourcesState.Active(
                         // Filtré aussi ici : une entrée de cache écrite avant
                         // que la liste existe contient encore ces hébergeurs.
@@ -1009,12 +1024,18 @@ class DetailsViewModel : ViewModel() {
             )
             // coroutineScope : suspend jusqu'à ce que tous les providers aient
             // répondu, pour ne mettre en cache qu'une liste complète.
+            val chronoTout = Chrono.debut("sources : tous les catalogues")
             coroutineScope {
                 providers.forEach { provider ->
                     launch(dispatcherEs) {
+                        val chronoCatalogue = Chrono.debut("sources : ${provider.name}")
                         val result = runCatching {
                             withTimeoutOrNull(PROVIDER_TIMEOUT_MS) { query(provider) }
                         }
+                        chronoCatalogue.fin(
+                            result.getOrNull()?.let { "${it.size} liens" }
+                                ?: if (result.isFailure) "échec" else "délai dépassé",
+                        )
                         if (generation != loadGeneration) return@launch
                         _sources.update { st ->
                             val active = st as? SourcesState.Active ?: return@update st
@@ -1045,6 +1066,7 @@ class DetailsViewModel : ViewModel() {
                 }
             }
 
+            chronoTout.fin()
             if (generation != loadGeneration) return@launch
             val active = _sources.value as? SourcesState.Active
             // Seuls les catalogues qui ont *répondu* comptent comme interrogés :
@@ -1255,6 +1277,7 @@ class DetailsViewModel : ViewModel() {
      */
     private fun startQuickPlay(label: String) {
         if (quickPlayJob?.isActive == true) return
+        chronoLecture = Chrono.debut("lecture : recherche et résolution de la source")
         val gen = ++resolveGen
         quickPlayLabel = label
         quickPlayJob = viewModelScope.launch {
@@ -1271,9 +1294,26 @@ class DetailsViewModel : ViewModel() {
                 localStream(key)?.let { local ->
                     registerUnlessCast(pendingMeta)
                     _quickPlay.value = QuickPlayState.Idle
-                    _resolved.value = local
+                    livre(local)
                     return@launch
                 }
+            }
+            // La source qui a joué la dernière fois sur ce titre passe avant la
+            // cascade : même fichier, donc mêmes pistes, et rien à chercher.
+            // Sautée si le lecteur vient de la refuser (rejectedLinks) ; oubliée
+            // si elle ne répond plus. Voir LastSourceRepository.
+            lastSource.get(playbackKey)?.takeIf { it.url !in rejectedLinks }?.let { souvenir ->
+                _quickPlay.value = QuickPlayState.Searching(hosterLabel(souvenir), hoster = hosterLabel(souvenir))
+                val stream = runCatching { ExtractorRegistry.resolve(souvenir) }.getOrNull()
+                if (gen != resolveGen) return@launch
+                if (stream != null && stream.url.isNotBlank() && isStreamPlayable(stream, playbackMinutes)) {
+                    registerUnlessCast(pendingMeta)
+                    playingLink = souvenir
+                    _quickPlay.value = QuickPlayState.Idle
+                    livre(stream)
+                    return@launch
+                }
+                lastSource.forget(playbackKey)
             }
             val lang = settings.streamLanguage.first().name
             _quickPlay.value = QuickPlayState.Searching(if (label.isBlank()) lang else "$label · $lang")
@@ -1318,8 +1358,9 @@ class DetailsViewModel : ViewModel() {
                         playingLink = next
                         // Ce qui vient de jouer ici rejouera probablement.
                         hosterTrust.recordSuccess(next.hoster)
+                        lastSource.remember(playbackKey, next)
                         _quickPlay.value = QuickPlayState.Idle
-                        _resolved.value = stream
+                        livre(stream)
                         return@launch
                     }
                     // Écarté durablement : la sonde vient de le refuser, inutile
@@ -1375,6 +1416,7 @@ class DetailsViewModel : ViewModel() {
 
     /** Résout un lien d'embed en flux jouable via les extracteurs. */
     fun play(link: EmbedLink) {
+        chronoLecture = Chrono.debut("lecture : résolution de ${link.hoster}")
         _resolveError.value = null
         // Un titre téléchargé se lit depuis le disque, sans toucher au réseau —
         // ni pour résoudre, ni pour vérifier que le flux répond. C'est ce qui
@@ -1383,7 +1425,7 @@ class DetailsViewModel : ViewModel() {
             localStream(key)?.let { local ->
                 viewModelScope.launch { registerUnlessCast(pendingMeta) }
                 playingLink = null
-                _resolved.value = local
+                livre(local)
                 return
             }
         }
@@ -1412,7 +1454,8 @@ class DetailsViewModel : ViewModel() {
                 // le chemin le plus courant, et la reprise après flux cassé ne
                 // savait pas quelle source venait d'échouer.
                 playingLink = link
-                _resolved.value = stream
+                lastSource.remember(playbackKey, link)
+                livre(stream)
             } else {
                 _resolveError.value = getString(Res.string.details_resolve_error, hosterLabel(link))
             }

@@ -79,6 +79,9 @@ private val REST_FG = Color(0xFFC9C9C9)
 private val ACTIVE_FG = Color.White
 private val DISABLED_FG = Color(0xFF5A5A5A)
 
+/** Texte d'un bouton rempli au focus, une fois le fond passé au blanc. */
+private val INVERSE_FG = Color(0xFF141414)
+
 /**
  * Bouton de l'app, 100 % foundation (aucune dépendance tv-material).
  *
@@ -128,6 +131,11 @@ fun MoovieButton(
 
     val fg = when {
         !enabled -> DISABLED_FG
+        // Rempli et au focus, le bouton **s'inverse** : sa couleur sur blanc au
+        // lieu de blanc sur sa couleur. Un liseré blanc autour d'un libellé
+        // blanc ne se voyait pas depuis le canapé — Sam, 09/10/2026 : « on ne
+        // sait jamais où il est, le focus ».
+        remplissage != null && active -> INVERSE_FG
         active || pressed -> ACTIVE_FG
         selected -> ACTIVE_FG
         else -> REST_FG
@@ -168,15 +176,18 @@ fun MoovieButton(
                     // ne se distingue pas d'une ombre.
                     Modifier
                         .background(
-                            if (pressed && enabled) {
-                                remplissage.copy(alpha = 0.82f)
-                            } else {
-                                remplissage
+                            when {
+                                // Au focus : fond blanc, et le liseré prend la
+                                // couleur du bouton. Voir INVERSE_FG.
+                                active && pressed && enabled -> Color.White.copy(alpha = 0.82f)
+                                active -> Color.White
+                                pressed && enabled -> remplissage.copy(alpha = 0.82f)
+                                else -> remplissage
                             },
                         )
                         .then(
                             if (active) {
-                                Modifier.border(CONTOUR_REMPLI, Color.White, MoovieShape)
+                                Modifier.border(CONTOUR_REMPLI, remplissage, MoovieShape)
                             } else {
                                 Modifier
                             },

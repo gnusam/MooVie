@@ -1,5 +1,6 @@
 package fr.moovie.tv
 
+import fr.moovie.tv.shared.Chrono
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -142,8 +143,19 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Chrono.repere("activité : onCreate")
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        // Premier dessin de la fenêtre : ce que l'œil voit en premier.
+        window.decorView.viewTreeObserver.addOnPreDrawListener(
+            object : android.view.ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    window.decorView.viewTreeObserver.removeOnPreDrawListener(this)
+                    Chrono.repere("activité : premier dessin")
+                    return true
+                }
+            },
+        )
 
         handleKeyExtras(intent)
         handleRemoteLink(intent)

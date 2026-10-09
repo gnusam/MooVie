@@ -1,5 +1,6 @@
 package fr.moovie.tv.ui.details
 
+import androidx.compose.material3.LocalContentColor
 import fr.moovie.tv.shared.formaterDecimal
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
@@ -1174,7 +1175,7 @@ fun DetailsScreenContent(
                                     when {
                                         searching -> {
                                             CircularProgressIndicator(
-                                                color = Color.White,
+                                                color = LocalContentColor.current,
                                                 strokeWidth = 2.dp,
                                                 modifier = Modifier.size(14.dp),
                                             )
@@ -2881,7 +2882,7 @@ private fun EpisodeDetail(
             val libelle: @Composable RowScope.() -> Unit = {
                 if (searching) {
                     CircularProgressIndicator(
-                        color = Color.White,
+                        color = LocalContentColor.current,
                         strokeWidth = 2.dp,
                         modifier = Modifier.size(14.dp),
                     )

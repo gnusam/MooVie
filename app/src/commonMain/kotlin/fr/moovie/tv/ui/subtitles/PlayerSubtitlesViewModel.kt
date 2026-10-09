@@ -60,6 +60,8 @@ data class PlayerSubtitlesState(
      * l'ordre de grandeur de ce qui reste.
      */
     val translated: Pair<Int, Int>? = null,
+    /** Le sous-titre actif est la traduction française, achevée. */
+    val translatedDone: Boolean = false,
 )
 
 /**
@@ -124,10 +126,29 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * Cherche les sous-titres du média en cours. [title] sert de repli quand la
      * clé de lecture ne porte pas d'identifiant TMDB exploitable.
      */
-    fun load(mediaKey: String, title: String, streamFps: Double) = io { search(mediaKey, title, streamFps) }
+    fun load(mediaKey: String, title: String, streamFps: Double) = io {
+        // Idempotent : les écrans peuvent l'appeler à chaque ouverture du menu.
+        // Ce n'est plus à eux de deviner si la liste est celle du bon épisode.
+        if (this.mediaKey == mediaKey && _state.value.candidates.isNotEmpty()) return@io
+        search(mediaKey, title, streamFps)
+    }
+
+    /**
+     * Le lecteur présente un média : s'il change, on repart de zéro.
+     *
+     * Le ViewModel est porté par l'activité et survit à la navigation d'un
+     * épisode à l'autre. Mesuré le 09/10/2026 (Sam : « l'épisode 2 me propose
+     * des sous-titres de l'épisode 1 ») : la liste, le sous-titre actif et sa
+     * traduction de l'épisode précédent restaient en place, et le menu ne
+     * cherchait plus puisque sa liste n'était pas vide.
+     */
+    fun enter(mediaKey: String) {
+        if (this.mediaKey.isNotEmpty() && this.mediaKey != mediaKey) reset()
+    }
 
     private suspend fun search(mediaKey: String, title: String, streamFps: Double) {
         if (!_state.value.available) return
+        enter(mediaKey)
         this.mediaKey = mediaKey
         this.streamFps = streamFps.takeIf { it > 0 }
 
@@ -191,7 +212,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
         // Un autre sous-titre est une autre traduction : le compteur du
         // precedent n'a plus de sens et laisserait l'ecran en « traduction en
         // cours » sur un fichier qui ne l'est pas.
-        _state.value = _state.value.copy(translated = null)
+        _state.value = _state.value.copy(translated = null, translatedDone = false)
         // La correction de cadence s'applique d'emblée : c'est la dérive qu'un
         // curseur de décalage ne rattrape pas, autant partir juste.
         val timing = timingFor(candidate.fps, streamFps)
@@ -244,7 +265,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
             }
         }
         original = files.storeTranslated(mediaKey, candidate, renderSrt(traduits))
-        _state.value = _state.value.copy(translated = null)
+        _state.value = _state.value.copy(translated = null, translatedDone = true)
         publish(_state.value.timing)
     }
 

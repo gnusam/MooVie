@@ -34,3 +34,6 @@ actual fun espaceTotal(chemin: okio.Path): Long =
 
 actual fun fabriqueParDefaut(): androidx.lifecycle.ViewModelProvider.Factory =
     androidx.lifecycle.ViewModelProvider.NewInstanceFactory()
+
+// Sur Android, la sortie standard arrive dans logcat sous l'étiquette System.out.
+actual fun journalChrono(ligne: String) = println("MoovieChrono $ligne")

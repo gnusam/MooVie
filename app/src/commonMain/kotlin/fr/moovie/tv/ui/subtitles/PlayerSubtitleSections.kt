@@ -1,5 +1,7 @@
 package fr.moovie.tv.ui.subtitles
 
+import fr.moovie.tv.resources.player_subtitles_translating_short
+import fr.moovie.tv.resources.player_subtitles_translated
 import androidx.compose.runtime.Composable
 import fr.moovie.tv.core.subtitles.model.SubtitleCandidate
 import fr.moovie.tv.core.subtitles.usecase.COMMON_FPS
@@ -66,14 +68,25 @@ fun onlineSubtitleSection(
             listOf(PlayerOption(stringResource(Res.string.player_subtitles_none_found), false) {})
         else -> {
             val mark = stringResource(Res.string.player_subtitles_downloaded)
+            val traduit = stringResource(Res.string.player_subtitles_translated)
+            val enCours = stringResource(Res.string.player_subtitles_translating_short)
             state.candidates.take(MAX_SHOWN).map { candidate ->
                 val paid = candidate.fileId in state.downloaded
+                val actif = candidate.fileId == state.active?.fileId
+                // L'état de la traduction se lit sur la ligne active : c'est là
+                // qu'on regarde pour savoir ce qui s'affiche.
+                val etat = when {
+                    !actif -> null
+                    state.translated != null -> enCours
+                    state.translatedDone -> traduit
+                    else -> null
+                }
                 PlayerOption(
                     // Le repère passe **en tête** : c'est l'information la plus
                     // actionnable de la ligne — gratuit ou non — et la seule que
                     // la troncature de la release ne doit jamais emporter.
-                    label = if (paid) "$mark · ${candidate.describe()}" else candidate.describe(),
-                    selected = candidate.fileId == state.active?.fileId,
+                    label = listOfNotNull(mark.takeIf { paid }, candidate.describe(), etat).joinToString(" · "),
+                    selected = actif,
                 ) { onPick(candidate) }
             }
         }
@@ -100,13 +113,15 @@ fun subtitleTranslationSection(
 ): PlayerOptionSection? {
     if (!state.canTranslate || state.active == null) return null
     val progres = state.translated
-    val option = if (progres == null) {
-        PlayerOption(stringResource(Res.string.player_subtitles_translate), false) { onTranslate() }
-    } else {
-        PlayerOption(
+    val option = when {
+        progres != null -> PlayerOption(
             stringResource(Res.string.player_subtitles_translating, progres.first, progres.second),
             selected = false,
         ) {}
+        // Fait : la ligne le dit, au lieu de reproposer « Traduire » comme si
+        // rien ne s'était passé.
+        state.translatedDone -> PlayerOption(stringResource(Res.string.player_subtitles_translated), selected = true) {}
+        else -> PlayerOption(stringResource(Res.string.player_subtitles_translate), false) { onTranslate() }
     }
     return PlayerOptionSection(
         stringResource(Res.string.player_subtitles_translate_title),
