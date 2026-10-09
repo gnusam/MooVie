@@ -359,6 +359,18 @@ class DetailsViewModel : ViewModel() {
     /** Du clic « Lire » au flux prêt à donner au lecteur. Voir Chrono. */
     private var chronoLecture: Chrono.Mesure? = null
 
+    /**
+     * La source mémorisée du titre en cours, lue **dès le chargement des
+     * sources** et non au clic : la première lecture d'un magasin coûte sur
+     * la TV, autant la payer pendant que l'utilisateur regarde la fiche.
+     */
+    private var souvenirSource: Pair<String, Deferred<EmbedLink?>>? = null
+
+    private fun prechargeSouvenir() {
+        val cle = playbackKey
+        souvenirSource = cle to viewModelScope.async { runCatching { lastSource.get(cle) }.getOrNull() }
+    }
+
     private fun livre(stream: PlayableStream) {
         chronoLecture?.fin(playingLink?.hoster.orEmpty())
         chronoLecture = null
@@ -845,6 +857,7 @@ class DetailsViewModel : ViewModel() {
         playbackNext = null
         playbackPoster = movie.details.posterUrl() ?: movie.details.backdropUrl().orEmpty()
         playbackOriginalLanguage = movie.details.originalLanguage
+        prechargeSouvenir()
         pendingMeta = ResumeEntry(
             key = playbackKey,
             tmdbId = tmdbId,
@@ -883,6 +896,7 @@ class DetailsViewModel : ViewModel() {
         playbackNext = nextEpisodeAfter(tv.details, season, episode)
         playbackPoster = tv.details.posterUrl() ?: tv.details.backdropUrl().orEmpty()
         playbackOriginalLanguage = tv.details.originalLanguage
+        prechargeSouvenir()
         pendingMeta = ResumeEntry(
             key = playbackKey,
             tmdbId = tmdbId,
@@ -1290,8 +1304,11 @@ class DetailsViewModel : ViewModel() {
             // C'est aussi ce qui rend le mode hors ligne automatique : il n'y a
             // pas de détection de réseau à faire, la présence du fichier suffit
             // à trancher.
-            pendingMeta?.key?.let { key ->
-                localStream(key)?.let { local ->
+            val chronoLocal = Chrono.debut("lecture : fichier local ?")
+            val local = pendingMeta?.key?.let { key -> localStream(key) }
+            chronoLocal.fin(if (local != null) "présent" else "absent")
+            pendingMeta?.key?.let { _ ->
+                local?.let { local ->
                     registerUnlessCast(pendingMeta)
                     _quickPlay.value = QuickPlayState.Idle
                     livre(local)
@@ -1302,16 +1319,24 @@ class DetailsViewModel : ViewModel() {
             // cascade : même fichier, donc mêmes pistes, et rien à chercher.
             // Sautée si le lecteur vient de la refuser (rejectedLinks) ; oubliée
             // si elle ne répond plus. Voir LastSourceRepository.
-            lastSource.get(playbackKey)?.takeIf { it.url !in rejectedLinks }?.let { souvenir ->
+            val chronoSouvenir = Chrono.debut("lecture : lecture de la source mémorisée")
+            val souvenirLu = souvenirSource?.takeIf { it.first == playbackKey }?.second?.await()
+                ?: lastSource.get(playbackKey)
+            chronoSouvenir.fin()
+            souvenirLu?.takeIf { it.url !in rejectedLinks }?.let { souvenir ->
                 Chrono.repere("lecture : source mémorisée (${souvenir.hoster}), réessai direct")
                 _quickPlay.value = QuickPlayState.Searching(hosterLabel(souvenir), hoster = hosterLabel(souvenir))
                 val chronoResolution = Chrono.debut("lecture : résolution ${souvenir.hoster}")
                 val stream = runCatching { ExtractorRegistry.resolve(souvenir) }.getOrNull()
                 chronoResolution.fin()
                 if (gen != resolveGen) return@launch
-                val chronoSonde = Chrono.debut("lecture : sonde du flux")
-                val jouable = stream != null && stream.url.isNotBlank() && isStreamPlayable(stream, playbackMinutes)
-                chronoSonde.fin(if (jouable) "ok" else "refusé")
+                // **Sans sonde** : elle coûtait 1,4 s (HEAD refusé puis GET, à
+                // travers la redirection vers le debrid) pour un lien qui a
+                // joué il y a peu. S'il est mort, le lecteur échoue et
+                // retryAfterPlaybackFailure rend la main à la cascade, ce lien
+                // écarté : on perd quelques secondes une fois, pas 1,4 s à
+                // chaque reprise.
+                val jouable = stream != null && stream.url.isNotBlank()
                 if (jouable && stream != null) {
                     registerUnlessCast(pendingMeta)
                     playingLink = souvenir
