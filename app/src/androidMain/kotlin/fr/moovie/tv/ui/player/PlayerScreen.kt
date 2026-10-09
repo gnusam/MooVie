@@ -867,6 +867,15 @@ fun PlayerScreen(
                 tracks = controller.tracks()
                 // Toutes les pistes audio du fichier, décodables ou non : c'est
                 // ce qui dit pourquoi le menu Audio n'en propose qu'une.
+                newTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { g ->
+                    for (i in 0 until g.length) {
+                        val f = g.getTrackFormat(i)
+                        Chrono.repere(
+                            "lecteur : piste texte id=${f.id} langue=${f.language} « ${f.label.orEmpty()} » " +
+                                "${f.sampleMimeType} décodable=${g.isTrackSupported(i)} choisie=${g.isTrackSelected(i)}",
+                        )
+                    }
+                }
                 newTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEach { g ->
                     for (i in 0 until g.length) {
                         val f = g.getTrackFormat(i)
@@ -1005,6 +1014,7 @@ fun PlayerScreen(
         if (subsFile == null && subsApplied == null) return@LaunchedEffect
         subsApplied = subsFile
         subtitleReloadAt = System.currentTimeMillis()
+        Chrono.repere("lecteur : sous-titre externe -> ${subsFile ?: "aucun"} (média $mediaKey)")
         controller.loadExternalSubtitle(subsFile)
     }
     DisposableEffect(Unit) { onDispose { subsViewModel.onLeave() } }
@@ -1017,7 +1027,7 @@ fun PlayerScreen(
     LaunchedEffect(isPlaying) {
         if (autoSubsDone || !isPlaying || !language.equals("VO", ignoreCase = true)) return@LaunchedEffect
         autoSubsDone = true
-        subsViewModel.autoFrench(mediaKey, title, controller.videoFps())
+        subsViewModel.autoFrench(mediaKey, title, controller.videoFps(), episodeTitle = subtitle.substringAfter(" — ", ""))
     }
 
     val chipVersion = updateVersion?.takeIf { updateChipFresh || controlsVisible }
@@ -1611,7 +1621,7 @@ fun PlayerScreen(
         // ce moment-là le flux est prêt, donc sa cadence est connue.
         LaunchedEffect(dialog) {
             if (dialog == PlayerDialogKind.SUBTITLES) {
-                subsViewModel.load(mediaKey, title, controller.videoFps())
+                subsViewModel.load(mediaKey, title, controller.videoFps(), episodeTitle = subtitle.substringAfter(" — ", ""))
             }
         }
 

@@ -44,9 +44,23 @@ fun rankSubtitles(
     streamFps: Double? = null,
     preferHearingImpaired: Boolean = false,
     preferForced: Boolean = false,
+    /**
+     * Titre de l'épisode d'après TMDB, ou null pour un film.
+     *
+     * Une release qui le contient est classée avant toutes les autres de sa
+     * langue, avant même la popularité. Mesuré le 09/10/2026 sur Fullmetal
+     * Alchemist (2003) S01E02 : OpenSubtitles range sous cette série, avec
+     * 22 591 téléchargements et des champs structurés corrects (série,
+     * saison, épisode), un « Fullmetal.Alchemist.Brotherhood.E02 » — un
+     * sous-titre de l'autre série, qui raconte l'épisode 1 de celle-ci. Seul
+     * le nom de la release le trahit ; les deux bons candidats s'appelaient
+     * « 02 - Body of the Sanctioned ».
+     */
+    episodeTitle: String? = null,
 ): List<SubtitleCandidate> {
     val langOrder = preferredLanguages.map { it.lowercase() }
     val stream = normalizeFps(streamFps)
+    val titre = episodeTitle?.let(::normalizeTitle)?.takeIf { it.length >= 4 }
 
     return candidates.sortedWith(
         compareBy<SubtitleCandidate> { candidate ->
@@ -59,6 +73,7 @@ fun rankSubtitles(
             // ne correspond pas se corrige. Constaté sur la sonde, où un
             // « Fight.Club.Forced » sortait en tête parce qu'il était le seul à
             // la bonne cadence.
+            .thenBy { if (titre != null && normalizeTitle(it.release).contains(titre)) 0 else 1 }
             .thenBy { if (it.foreignPartsOnly == preferForced) 0 else 1 }
             .thenBy { if (it.hearingImpaired == preferHearingImpaired) 0 else 1 }
             .thenBy { if (it.machineTranslated) 1 else 0 }
@@ -81,3 +96,7 @@ private fun fpsRank(subtitleFps: Double?, streamFps: Double?): Int {
     if (streamFps == null) return 1
     return if (abs(sub - streamFps) < 0.01) 0 else 1
 }
+
+/** Minuscules, lettres et chiffres seulement, un espace entre les mots : « Body.of.the.Sanctioned » et « Body of the Sanctioned » se rejoignent. */
+private fun normalizeTitle(text: String): String =
+    text.lowercase().map { if (it.isLetterOrDigit()) it else ' ' }.joinToString("").trim().replace(Regex("\\s+"), " ")

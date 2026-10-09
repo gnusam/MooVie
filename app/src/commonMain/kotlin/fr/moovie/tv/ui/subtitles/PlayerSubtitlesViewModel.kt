@@ -1,5 +1,6 @@
 package fr.moovie.tv.ui.subtitles
 
+import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.shared.dispatcherEs
 import fr.moovie.tv.shared.maintenantMs
 import androidx.lifecycle.ViewModel
@@ -126,11 +127,11 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * Cherche les sous-titres du média en cours. [title] sert de repli quand la
      * clé de lecture ne porte pas d'identifiant TMDB exploitable.
      */
-    fun load(mediaKey: String, title: String, streamFps: Double) = io {
+    fun load(mediaKey: String, title: String, streamFps: Double, episodeTitle: String = "") = io {
         // Idempotent : les écrans peuvent l'appeler à chaque ouverture du menu.
         // Ce n'est plus à eux de deviner si la liste est celle du bon épisode.
         if (this.mediaKey == mediaKey && _state.value.candidates.isNotEmpty()) return@io
-        search(mediaKey, title, streamFps)
+        search(mediaKey, title, streamFps, episodeTitle)
     }
 
     /**
@@ -143,10 +144,13 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * cherchait plus puisque sa liste n'était pas vide.
      */
     fun enter(mediaKey: String) {
-        if (this.mediaKey.isNotEmpty() && this.mediaKey != mediaKey) reset()
+        if (this.mediaKey.isNotEmpty() && this.mediaKey != mediaKey) {
+            Chrono.repere("sous-titres : nouveau média ${this.mediaKey} -> $mediaKey, remise à zéro")
+            reset()
+        }
     }
 
-    private suspend fun search(mediaKey: String, title: String, streamFps: Double) {
+    private suspend fun search(mediaKey: String, title: String, streamFps: Double, episodeTitle: String = "") {
         if (!_state.value.available) return
         enter(mediaKey)
         this.mediaKey = mediaKey
@@ -165,6 +169,10 @@ class PlayerSubtitlesViewModel : ViewModel() {
 
         val languages = settings.subtitleLanguages.first()
         val found = catalog.search(media, languages)
+        Chrono.repere(
+            "sous-titres : recherche $mediaKey ($media) -> ${found.size} candidats ; premiers : " +
+                found.take(3).joinToString(" | ") { "${it.language} ${it.fileId} ${it.release.take(40)}" },
+        )
         _state.value = _state.value.copy(
             loading = false,
             // Les deux préférences de contenu passent ici, et nulle part
@@ -177,6 +185,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
                 streamFps = this.streamFps,
                 preferHearingImpaired = settings.subtitlePreferHearingImpaired.first(),
                 preferForced = settings.subtitlePreferForced.first(),
+                episodeTitle = episodeTitle.takeIf { it.isNotBlank() },
             ),
             trouble = if (found.isEmpty()) SubtitleTrouble.NOTHING_FOUND else null,
             quota = catalog.quota(),
@@ -188,7 +197,12 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * Active un sous-titre. Ne consomme le quota que si le fichier n'a pas déjà
      * été téléchargé pour ce média.
      */
-    fun pick(candidate: SubtitleCandidate) = io { activate(candidate) }
+    fun pick(candidate: SubtitleCandidate) = io {
+        // Un choix manuel d'un sous-titre qui n'est pas en français se traduit
+        // aussi : Sam, 09/10/2026, « est-ce que ça va me le traduire au bout
+        // d'un moment ou rester bloqué en anglais éternellement ? ».
+        if (activate(candidate) && candidate.language != "fr") translateActive()
+    }
 
     /** Rend false quand le quota a refusé le téléchargement. */
     private suspend fun activate(candidate: SubtitleCandidate): Boolean {
@@ -209,6 +223,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
         }
 
         original = source
+        Chrono.repere("sous-titres : activation ${candidate.language} ${candidate.fileId} « ${candidate.release.take(40)} » pour $mediaKey, cache=${cached != null} -> $source")
         // Un autre sous-titre est une autre traduction : le compteur du
         // precedent n'a plus de sens et laisserait l'ecran en « traduction en
         // cours » sur un fichier qui ne l'est pas.
@@ -247,6 +262,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
 
         val cues = parseSrt(files.read(source) ?: return)
         if (cues.isEmpty()) return
+        Chrono.repere("sous-titres : traduction de $source, ${cues.size} répliques")
         _state.value = _state.value.copy(translated = 0 to cues.size)
 
         // Le compteur avance à chaque lot, mais le lecteur ne recharge le
@@ -266,6 +282,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
         }
         original = files.storeTranslated(mediaKey, candidate, renderSrt(traduits))
         _state.value = _state.value.copy(translated = null, translatedDone = true)
+        Chrono.repere("sous-titres : traduction finie -> $original")
         publish(_state.value.timing)
     }
 
@@ -283,15 +300,22 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * Ne fait rien si un sous-titre est déjà actif : un choix fait dans le
      * menu, ou une reprise, ne se fait pas écraser.
      */
-    fun autoFrench(mediaKey: String, title: String, streamFps: Double) = io {
-        if (_state.value.active != null) return@io
+    fun autoFrench(mediaKey: String, title: String, streamFps: Double, episodeTitle: String = "") = io {
+        if (_state.value.active != null) {
+            Chrono.repere("sous-titres : auto $mediaKey, déjà actif ${_state.value.active?.fileId}, rien à faire")
+            return@io
+        }
         if (_state.value.candidates.isEmpty() || this.mediaKey != mediaKey) {
-            search(mediaKey, title, streamFps)
+            search(mediaKey, title, streamFps, episodeTitle)
         }
         val candidates = _state.value.candidates
         val choisi = candidates.firstOrNull { it.language == "fr" }
             ?: candidates.firstOrNull { it.language == "en" }.takeIf { translator.configured }
-            ?: return@io
+        if (choisi == null) {
+            Chrono.repere("sous-titres : auto $mediaKey, aucun candidat fr ni en")
+            return@io
+        }
+        Chrono.repere("sous-titres : auto $mediaKey, choisi ${choisi.language} ${choisi.fileId}")
         if (!activate(choisi)) return@io
         if (choisi.language != "fr") translateActive()
     }
@@ -338,6 +362,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * disparaître parce qu'on a changé d'épisode.
      */
     fun reset() {
+        Chrono.repere("sous-titres : reset (média $mediaKey)")
         onLeave()
         original = null
         mediaKey = ""
@@ -357,7 +382,9 @@ class PlayerSubtitlesViewModel : ViewModel() {
         // `okio.Path.toString()` rend le chemin natif de la plateforme, ce
         // que `File.absolutePath` rendait déjà : le lecteur reçoit la même
         // chaîne qu'avant.
-        _file.value = files.retimed(source, timing).toString()
+        val chemin = files.retimed(source, timing).toString()
+        Chrono.repere("sous-titres : publication $chemin")
+        _file.value = chemin
     }
 
     private companion object {
