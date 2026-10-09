@@ -350,6 +350,21 @@ android {
             )
             signingConfig = signingConfigs.getByName("release")
         }
+        // Le build du fork pour la TV : optimisé par R8 comme une release,
+        // mais débuggable (run-as transplante la config) et signé avec la clé
+        // de debug (s'installe par-dessus l'APK de debug, données conservées).
+        // Mesuré le 09/10/2026 sur la TCL : 7,1 s avant notre code avec l'APK
+        // de debug de 31 Mo et ses 20 dex (76 Mo), le chargement des classes.
+        create("stremio") {
+            initWith(getByName("release"))
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isDebuggable = true
+            applicationIdSuffix = ".stremio"
+            versionNameSuffix = "-stremio"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release", "debug")
+        }
     }
 
     compileOptions {

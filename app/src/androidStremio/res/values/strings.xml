@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nom affiché par le lanceur du téléviseur, **pour la variante debug seulement**.
+
+  Sans lui les deux installations s'appellent « Moo-vie » et rien ne les
+  distingue sur l'écran d'accueil — or c'est justement pour les comparer côte à
+  côte qu'elles cohabitent.
+-->
+<resources>
+    <string name="app_name">Moo-vie Stremio</string>
+</resources>
