@@ -88,6 +88,7 @@ import fr.moovie.tv.ui.player.qualitySection
 import fr.moovie.tv.ui.player.bestDownloadStream
 import fr.moovie.tv.ui.player.resolveAlternative
 import fr.moovie.tv.ui.format.formatNowDateTime
+import fr.moovie.tv.core.player.chooseAudioTrack
 import fr.moovie.tv.core.player.matchAudioTrack
 import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.core.player.playerSourceLine
@@ -681,18 +682,28 @@ fun PlayerScreen(
         parseMediaKey(mediaKey)?.let { if (it.isTv) "tv:${it.tmdbId}" else null }
     }
 
-    // Réapplique la piste audio retenue sur cette série. Le libellé, jamais
-    // l'identifiant : celui-ci est propre au flux (voir matchAudioTrack).
+    // La piste audio, une fois les pistes connues : d'abord celle retenue sur
+    // cette série (le libellé, jamais l'identifiant, propre au flux — voir
+    // matchAudioTrack), sinon la règle commune, qui écarte l'audiodescription
+    // que la seule préférence de langue avait laissé passer (voir
+    // chooseAudioTrack). Une fois par média : les republications suivantes ne
+    // doivent pas défaire un choix fait entre-temps dans le menu.
     var audioRestored by remember(mediaKey) { mutableStateOf(false) }
     LaunchedEffect(tracks.audio, titleKey) {
-        val key = titleKey ?: return@LaunchedEffect
         if (audioRestored || tracks.audio.size < 2) return@LaunchedEffect
-        val remembered = progress.audioTrack(key) ?: return@LaunchedEffect
-        val target = matchAudioTrack(remembered, tracks.audio.map { it.label }) ?: return@LaunchedEffect
-        val track = tracks.audio.firstOrNull { it.label == target } ?: return@LaunchedEffect
+        val remembered = titleKey?.let { progress.audioTrack(it) }
+        val retenue = remembered
+            ?.let { matchAudioTrack(it, tracks.audio.map { t -> t.label }) }
+            ?.let { label -> tracks.audio.firstOrNull { it.label == label } }
+        val target = retenue
+            ?: chooseAudioTrack(tracks.audio, preferredAudioLanguages(language, originalLanguage))
+            ?: return@LaunchedEffect
         audioRestored = true
-        if (!track.selected) {
-            controller.selectAudio(track.id)
+        if (!target.selected) {
+            Chrono.repere(
+                "lecteur : piste audio ${if (retenue != null) "mémorisée" else "choisie par la règle"} -> « ${target.label} »",
+            )
+            controller.selectAudio(target.id)
             tracks = controller.tracks()
         }
     }
