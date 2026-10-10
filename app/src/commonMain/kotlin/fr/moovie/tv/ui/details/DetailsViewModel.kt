@@ -1323,7 +1323,13 @@ class DetailsViewModel : ViewModel() {
             val souvenirLu = souvenirSource?.takeIf { it.first == playbackKey }?.second?.await()
                 ?: lastSource.get(playbackKey)
             chronoSouvenir.fin()
-            souvenirLu?.takeIf { it.url !in rejectedLinks }?.let { souvenir ->
+            // Un souvenir d'un catalogue secondaire ne passe pas devant la
+            // tête : voir souvenirPrioritaire.
+            val catalogueDeTete = activeProviders().firstOrNull()?.name
+            souvenirLu?.takeIf { !souvenirPrioritaire(it, catalogueDeTete) }?.let {
+                Chrono.repere("lecture : source mémorisée (${it.hoster}) ignorée, ${catalogueDeTete} passe devant")
+            }
+            souvenirLu?.takeIf { it.url !in rejectedLinks && souvenirPrioritaire(it, catalogueDeTete) }?.let { souvenir ->
                 Chrono.repere("lecture : source mémorisée (${souvenir.hoster}), réessai direct")
                 _quickPlay.value = QuickPlayState.Searching(hosterLabel(souvenir), hoster = hosterLabel(souvenir))
                 val chronoResolution = Chrono.debut("lecture : résolution ${souvenir.hoster}")
@@ -1357,6 +1363,9 @@ class DetailsViewModel : ViewModel() {
             var startupWaits = 0
             // Une seule reprise autorisée après purge d'un cache périmé.
             var retriedWithoutCache = false
+            // Tours passés à attendre le catalogue de tête : voir
+            // catalogueDeTeteAttendu.
+            var toursDePatience = 0
             while (true) {
                 val active = _sources.value as? SourcesState.Active
                 if (active == null) {
@@ -1370,6 +1379,16 @@ class DetailsViewModel : ViewModel() {
                     heights = _heights.value,
                     trust = trustNow,
                 )
+                if (next != null && catalogueDeTeteAttendu(active.providers, next, toursDePatience)) {
+                    if (toursDePatience == 0) {
+                        Chrono.repere(
+                            "lecture : ${next.provider} a répondu, on attend ${active.providers.first().name} (catalogue de tête)",
+                        )
+                    }
+                    toursDePatience++
+                    delay(250)
+                    continue
+                }
                 if (next != null) {
                     tried += next.url
                     // Affiche l'hébergeur en cours d'essai : la cascade devient
