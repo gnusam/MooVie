@@ -2,6 +2,7 @@ package fr.moovie.tv.ui.details
 
 import fr.moovie.tv.core.sources.model.EmbedLink
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -48,6 +49,36 @@ class QuickPlayPriorityTest {
     fun `sans liste de catalogues, rien n'attend`() {
         assertFalse(catalogueDeTeteAttendu(emptyList(), lien("vidapi"), toursAttendus = 0))
     }
+
+    private val cache = lien("stremio").copy(url = "https://t/resolve/realdebrid/K/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/null/0/a.mkv")
+    private val differe = lien("stremio").copy(
+        url = "https://t/resolve/realdebrid/K/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/null/0/b.mkv",
+        deferred = true,
+    )
+
+    private fun suivant(links: List<EmbedLink>, sansVo: Set<String> = emptySet(), differeAutorise: Boolean = false, lang: String = "VO") =
+        lienSuivant(links, lang, emptySet(), emptyMap(), emptyMap(), sansVo, differeAutorise)
+
+    @Test
+    fun `un lien immediat passe toujours devant un lien differe`() {
+        assertEquals(cache.url, suivant(listOf(differe, cache), differeAutorise = true)?.id())
+    }
+
+    @Test
+    fun `un lien differe n'est pris que si on l'autorise`() {
+        assertEquals(null, suivant(listOf(differe)))
+        assertEquals(differe.url, suivant(listOf(differe), differeAutorise = true)?.id())
+    }
+
+    @Test
+    fun `une source connue sans VO est ecartee pour la VO, pas pour la VF`() {
+        val sansVo = setOf("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        assertEquals(differe.url, suivant(listOf(cache, differe), sansVo, differeAutorise = true)?.id())
+        val vf = cache.copy(language = "VF")
+        assertEquals(vf.url, suivant(listOf(vf), sansVo, lang = "VF")?.id())
+    }
+
+    private fun EmbedLink.id() = url
 
     @Test
     fun `le souvenir ne compte que s'il vient de la tete`() {

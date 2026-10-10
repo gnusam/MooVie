@@ -33,6 +33,16 @@ data class EmbedLink(
      * pas un critère qui n'existe pas.
      */
     val variant: String? = null,
+    /**
+     * Le fichier n'est pas encore chez le debrid : le lire lui demande d'abord
+     * d'aller le chercher, ce qui prend des minutes, ou n'aboutit jamais.
+     *
+     * La cascade automatique ne s'en sert qu'en dernier recours, une fois, et
+     * jamais pour en essayer plusieurs d'affilée — chaque essai ajoute un
+     * torrent au compte. Dans le panneau, c'est un choix explicite de
+     * l'utilisateur. Voir StremioProvider et StremioExtractor.
+     */
+    val deferred: Boolean = false,
 )
 
 /**

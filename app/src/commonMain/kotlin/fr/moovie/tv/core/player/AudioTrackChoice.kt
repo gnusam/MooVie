@@ -45,6 +45,24 @@ fun chooseAudioTrack(tracks: List<PlayerTrack>, preferred: List<String>): Player
 }
 
 /**
+ * Vrai quand le fichier joué n'a **aucune** piste ordinaire dans la langue
+ * d'origine : la VO n'y est pas, quoi qu'en dise le nom de la release.
+ *
+ * Prudent par construction : faux dès qu'une piste n'annonce pas sa langue,
+ * parce qu'une piste muette est peut-être justement l'originale (mkvmerge
+ * marque `eng` ce que l'encodeur n'a pas étiqueté — mesuré sur Castamar, où la
+ * 5.1 sans titre s'est avérée en anglais, mais ça ne se généralise pas), et
+ * faux sans langue d'origine connue. Une erreur ici écarterait une bonne
+ * source pour toute la saison.
+ */
+fun lacksOriginalAudio(tracks: List<PlayerTrack>, originalLanguage: String): Boolean {
+    val original = languageBase(originalLanguage) ?: return false
+    if (tracks.isEmpty()) return false
+    if (tracks.any { languageBase(it.language) == null }) return false
+    return tracks.none { !it.audioDescription && languageBase(it.language) == original }
+}
+
+/**
  * Titres qui désignent une audiodescription ou un commentaire, tels qu'on les
  * trouve dans les rips : « Audio Description », « AD », « Audiodescription »,
  * « Descriptive Audio », « Commentary », « Audiodeskription », « VI »

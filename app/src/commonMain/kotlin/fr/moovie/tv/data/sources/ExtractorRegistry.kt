@@ -37,7 +37,7 @@ object ExtractorRegistry {
         extractors = listOf(
             // Ne revendique aucun domaine : il est atteint par son nom, donc sa
             // place dans la liste n'a d'effet que sur le coût du parcours.
-            StremioExtractor(),
+            StremioExtractor(gateway),
             // **Avant** DirectStream, et pas par préférence : les liens
             // SwiftFlow sont des `.mp4`, donc DirectStream les revendiquerait le
             // premier et repartirait sans le `Referer` que le CDN exige — 403

@@ -1,6 +1,9 @@
 package fr.moovie.tv.ui.details
 
 import fr.moovie.tv.core.sources.model.EmbedLink
+import fr.moovie.tv.core.sources.usecase.HosterTrust
+import fr.moovie.tv.core.sources.usecase.nextLinkFor
+import fr.moovie.tv.core.sources.usecase.sourceIdentity
 
 /**
  * Le catalogue de tête passe avant la vitesse de réponse.
@@ -32,6 +35,37 @@ fun catalogueDeTeteAttendu(
     if (tete.status != ProviderStatus.LOADING) return false
     if (candidat.provider == tete.name) return false
     return toursAttendus < PATIENCE_TOURS
+}
+
+/**
+ * Le prochain lien de la cascade, en trois cercles.
+ *
+ *  1. Les liens **immédiats** : ni différés (voir [EmbedLink.deferred]), ni
+ *     connus pour ne pas avoir la VO quand c'est la VO qu'on veut
+ *     ([sansVo], identités de source apprises en jouant).
+ *  2. Faute d'immédiat, et seulement si [differeAutorise] — tous les
+ *     catalogues ont répondu et aucun différé n'a encore été tenté — un lien
+ *     différé : Real-Debrid va chercher le fichier, ce qui prend des minutes.
+ *     Un seul par lecture : chaque essai ajoute un torrent au compte.
+ *  3. Rien.
+ *
+ * Sam, 10/10/2026, sur Castamar dont le seul fichier en cache n'avait pas de
+ * piste espagnole : « l'objectif, c'est d'écouter de la VO ».
+ */
+fun lienSuivant(
+    links: List<EmbedLink>,
+    preferred: String,
+    excluded: Set<String>,
+    heights: Map<String, Int>,
+    trust: Map<String, HosterTrust>,
+    sansVo: Set<String>,
+    differeAutorise: Boolean,
+): EmbedLink? {
+    val voVoulue = preferred.equals("VO", ignoreCase = true)
+    val admissibles = links.filterNot { voVoulue && sourceIdentity(it.url) in sansVo }
+    nextLinkFor(admissibles.filterNot { it.deferred }, preferred, excluded, heights, trust)?.let { return it }
+    if (!differeAutorise) return null
+    return nextLinkFor(admissibles.filter { it.deferred }, preferred, excluded, heights, trust)
 }
 
 /**

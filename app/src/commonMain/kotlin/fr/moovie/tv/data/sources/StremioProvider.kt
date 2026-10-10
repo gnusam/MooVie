@@ -110,14 +110,18 @@ class StremioProvider(
             "$base/stream/$type/$id.json",
             headers = mapOf("User-Agent" to Ua.BROWSER, "Accept" to "application/json"),
         ) ?: return emptyList()
-        return parse(body, if (media is MediaRef.Episode) CIBLE_EPISODE else CIBLE_FILM)
+        return parse(
+            body,
+            if (media is MediaRef.Episode) CIBLE_EPISODE else CIBLE_FILM,
+            originalLanguage = media.originalLanguage,
+        )
     }
 
     /**
      * Sans réseau, donc testable sur une réponse enregistrée — c'est là que vit
      * tout ce qui peut se tromper.
      */
-    internal fun parse(body: String, cible: Long = CIBLE_FILM): List<EmbedLink> {
+    internal fun parse(body: String, cible: Long = CIBLE_FILM, originalLanguage: String = ""): List<EmbedLink> {
         val streams = runCatching {
             json.parseToJsonElement(body).jsonObject["streams"]?.jsonArray
         }.getOrNull() ?: return emptyList()
@@ -145,20 +149,34 @@ class StremioProvider(
                 ?.get("filename")?.jsonPrimitive?.contentOrNull()
                 ?: title.lineSequence().firstOrNull().orEmpty()
 
-            if (undecodable("$filename\n$title")) return@mapNotNull null
+            val release = "$filename\n$title"
+            if (undecodable(release)) return@mapNotNull null
+            // Un doublage dans une langue que personne n'a demandée n'est ni
+            // une VO ni une VF : il n'a rien à faire sur la fiche.
+            val annoncee = langueAnnoncee(release)
+            if (doublageEtranger(annoncee, release, originalLanguage)) return@mapNotNull null
 
             Classe(
                 lien = EmbedLink(
                     url = url,
                     hoster = StremioExtractor.HOSTER,
                     language = languageOf(filename),
-                    variant = variantOf(name, title, cached),
+                    variant = variantOf(name, title, cached, annoncee?.second),
+                    // Pas chez le debrid : le lire lui demande d'abord d'aller
+                    // le chercher. Voir StremioExtractor.
+                    deferred = !cached,
                 ),
                 definition = qualityRank(qualityOf(name)),
-                codec = codecRank("$filename\n$title"),
+                codec = codecRank(release),
                 octets = sizeBytes(title),
             )
-        }.sortedWith(compareBy({ it.definition }, { it.codec }, { ecart(it.octets, cible) })).map { it.lien }
+        }
+            // Ce qui joue tout de suite d'abord ; parmi ceux-là, la définition
+            // que la télé lit, le codec qu'elle avoue, le poids visé.
+            .sortedWith(
+                compareBy({ it.lien.deferred }, { it.definition }, { it.codec }, { ecart(it.octets, cible) }),
+            )
+            .map { it.lien }
     }
 
     /** Un lien et les deux nombres qui décident de sa place. Interne au tri. */
@@ -347,14 +365,69 @@ class StremioProvider(
          * ne passera pas sur une connexion domestique, là où la définition seule
          * laisserait croire que tous les « 1080p » se valent.
          */
-        fun variantOf(name: String, title: String, cached: Boolean): String? {
+        fun variantOf(name: String, title: String, cached: Boolean, langue: String? = null): String? {
             val parts = buildList {
                 qualityOf(name)?.let { add(it) }
                 SIZE_RE.find(title)?.let { add(it.value.replace(',', '.')) }
                 audioOf(title)?.let { add(it) }
-                if (!cached) add("à mettre en cache")
+                // La langue que la release annonce (« espagnol »), quand elle
+                // le fait : sur une fiche VO, c'est ce qui distingue la vraie
+                // version originale d'un « MultiLang » qui ne la porte pas.
+                langue?.let { add(it) }
+                // Pas encore chez le debrid : Real-Debrid ira le chercher au
+                // moment de lire, une à deux minutes pour un torrent partagé.
+                if (!cached) add("à récupérer")
             }
             return parts.joinToString(" · ").takeIf { it.isNotBlank() }
         }
+
+        /**
+         * La langue audio que la release **annonce**, code ISO 639-1 et nom en
+         * français, ou null quand le nom ne dit rien. Les marqueurs de
+         * sous-titres (`EngSub`, `SweSub`) ne comptent pas : ils ne forment pas
+         * un mot seul. Un titre en cyrillique vient d'un tracker russe et porte
+         * un doublage russe, « Original + » ou pas.
+         */
+        fun langueAnnoncee(release: String): Pair<String, String>? {
+            val r = release.uppercase()
+            LANGUES_RELEASE.firstOrNull { (motif, _) -> motif.containsMatchIn(r) }?.let { return it.second }
+            if (CYRILLIQUE.containsMatchIn(release)) return "ru" to "russe"
+            return null
+        }
+
+        /**
+         * Vrai pour un doublage dans une autre langue que l'originale — et
+         * seulement quand on connaît l'originale et que la release ne dit pas
+         * porter plusieurs pistes. Le français n'arrive jamais ici : `FRENCH`
+         * et consorts font une VF, voir [languageOf].
+         */
+        fun doublageEtranger(annoncee: Pair<String, String>?, release: String, originalLanguage: String): Boolean {
+            val original = originalLanguage.trim().lowercase()
+            if (original.isEmpty() || original == "xx") return false
+            val code = annoncee?.first ?: return false
+            if (code == original) return false
+            val r = release.uppercase()
+            if (MULTI_AUDIO_RE.containsMatchIn(r) || MULTILANG_RE.containsMatchIn(r)) return false
+            return true
+        }
+
+        private val MULTILANG_RE = Regex("""\b(MULTI|MULTILANG|MULTILANGUAGE|DUAL)\b""")
+        private val CYRILLIQUE = Regex("""[\u0400-\u04FF]""")
+
+        /** Mots de release qui désignent une langue audio, du plus fréquent au plus rare. */
+        private val LANGUES_RELEASE: List<Pair<Regex, Pair<String, String>>> = listOf(
+            Regex("""\b(SPANISH|CASTELLANO|ESPANOL|ESPAÑOL|LATINO)\b""") to ("es" to "espagnol"),
+            Regex("""\b(ITA|ITALIAN|ITALIANO)\b""") to ("it" to "italien"),
+            Regex("""\b(GERMAN|DEUTSCH)\b""") to ("de" to "allemand"),
+            Regex("""\b(RUS|RUSSIAN)\b""") to ("ru" to "russe"),
+            Regex("""\b(JAP|JAPANESE|JPN)\b""") to ("ja" to "japonais"),
+            Regex("""\b(KOR|KOREAN)\b""") to ("ko" to "coréen"),
+            Regex("""\b(HINDI|HIN)\b""") to ("hi" to "hindi"),
+            Regex("""\b(PORTUGUESE|DUBLADO|PT-BR|PTBR)\b""") to ("pt" to "portugais"),
+            Regex("""\b(TURKISH|TUR)\b""") to ("tr" to "turc"),
+            Regex("""\b(POLISH|LEKTOR)\b""") to ("pl" to "polonais"),
+            Regex("""\b(DUTCH|NLSUBBED)\b""") to ("nl" to "néerlandais"),
+            Regex("""\b(ENGLISH|ENG)\b""") to ("en" to "anglais"),
+        )
     }
 }

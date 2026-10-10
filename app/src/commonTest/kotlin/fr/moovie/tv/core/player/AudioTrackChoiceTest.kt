@@ -89,6 +89,19 @@ class AudioTrackChoiceTest {
     }
 
     @Test
+    fun `le fichier Castamar n'a pas de VO espagnole, et on le sait en le jouant`() {
+        assertTrue(lacksOriginalAudio(castamar, "es"))
+        assertFalse(lacksOriginalAudio(castamar, "en"), "l'anglais, lui, y est")
+        assertFalse(lacksOriginalAudio(castamar, ""), "sans langue d'origine, on ne juge pas")
+    }
+
+    @Test
+    fun `une piste sans langue annoncee suspend le jugement`() {
+        val pistes = listOf(piste("0:0", null, "", channels = 6), piste("0:1", "en", "English"))
+        assertFalse(lacksOriginalAudio(pistes, "ja"))
+    }
+
+    @Test
     fun `les titres d'audiodescription sont reconnus, les autres non`() {
         listOf(
             "European Spanish - Audio Description", "AD", "Audiodescription", "French (AD)",

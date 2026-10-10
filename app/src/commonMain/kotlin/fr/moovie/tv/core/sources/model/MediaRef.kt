@@ -25,10 +25,20 @@ sealed interface MediaRef {
     val title: String
     val year: String?
 
+    /**
+     * Langue originale du titre (ISO 639-1, « es », « ja »), vide si inconnue.
+     *
+     * Sert aux catalogues qui lisent la langue dans un nom de release : un
+     * « ITA » sur une série espagnole est un doublage italien, pas une VO, et
+     * seul ce code permet de le dire.
+     */
+    val originalLanguage: String
+
     data class Movie(
         override val tmdbId: Int,
         override val title: String,
         override val year: String? = null,
+        override val originalLanguage: String = "",
     ) : MediaRef
 
     data class Episode(
@@ -37,5 +47,6 @@ sealed interface MediaRef {
         override val year: String? = null,
         val season: Int,
         val episode: Int,
+        override val originalLanguage: String = "",
     ) : MediaRef
 }

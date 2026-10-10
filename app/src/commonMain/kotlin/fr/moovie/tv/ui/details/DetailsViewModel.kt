@@ -1,6 +1,10 @@
 package fr.moovie.tv.ui.details
 
 import fr.moovie.tv.data.sources.LastSourceRepository
+import fr.moovie.tv.data.sources.SourceAudioRepository
+import fr.moovie.tv.core.player.lacksOriginalAudio
+import fr.moovie.tv.core.sources.usecase.sourceIdentity
+import fr.moovie.tv.ui.player.PlayerTrack
 import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.shared.dispatcherEs
 import fr.moovie.tv.shared.maintenantMs
@@ -867,7 +871,12 @@ class DetailsViewModel : ViewModel() {
         )
         startSourceLoad {
             it.sourcesFor(
-                MediaRef.Movie(tmdbId, catalogTitle(movie.details.title), movie.details.year),
+                MediaRef.Movie(
+                    tmdbId,
+                    catalogTitle(movie.details.title),
+                    movie.details.year,
+                    originalLanguage = movie.details.originalLanguage,
+                ),
             )
         }
     }
@@ -914,6 +923,7 @@ class DetailsViewModel : ViewModel() {
                     tv.details.year,
                     season,
                     episode,
+                    originalLanguage = tv.details.originalLanguage,
                 ),
             )
         }
@@ -952,6 +962,7 @@ class DetailsViewModel : ViewModel() {
      */
     private val hosterTrust = HosterTrustRepository()
     private val lastSource = LastSourceRepository()
+    private val sourceAudio = SourceAudioRepository()
 
     /**
      * Verdicts en mémoire, relus en continu.
@@ -1144,6 +1155,7 @@ class DetailsViewModel : ViewModel() {
                 tv.details.year,
                 season,
                 episode,
+                originalLanguage = tv.details.originalLanguage,
             )
             val answered = mutableSetOf<String>()
             val links = coroutineScope {
@@ -1191,6 +1203,26 @@ class DetailsViewModel : ViewModel() {
      * Renvoie false si plus rien n'est à tenter — à l'appelant de traiter
      * l'échec (retour à la fiche).
      */
+    /**
+     * Le lecteur dit quelles pistes audio le fichier porte vraiment.
+     *
+     * Si la VO était demandée et qu'aucune piste ordinaire n'est dans la
+     * langue d'origine, la source est retenue comme « sans VO » (voir
+     * SourceAudioRepository, par identité de release, donc pour tout le pack
+     * de saison) : la prochaine lecture rapide l'écartera et passera à la
+     * suivante — jusqu'à une version annoncée dans la bonne langue, que
+     * Real-Debrid ira chercher s'il le faut. Mesuré sur Castamar, 10/10/2026.
+     */
+    fun audioTracksObserved(tracks: List<PlayerTrack>) {
+        val link = playingLink ?: return
+        if (!link.language.equals("VO", ignoreCase = true)) return
+        val original = playbackOriginalLanguage
+        if (!lacksOriginalAudio(tracks, original)) return
+        val identite = sourceIdentity(link.url)
+        Chrono.repere("lecture : ${link.hoster} n'a pas de piste « $original », source retenue comme sans VO ($identite)")
+        viewModelScope.launch { sourceAudio.marquerSansVo(identite) }
+    }
+
     fun retryAfterPlaybackFailure(): Boolean {
         val failed = playingLink ?: return false
         rejectedLinks += failed.url
@@ -1366,18 +1398,23 @@ class DetailsViewModel : ViewModel() {
             // Tours passés à attendre le catalogue de tête : voir
             // catalogueDeTeteAttendu.
             var toursDePatience = 0
+            // Un seul lien différé par lecture : voir lienSuivant.
+            var differeEssaye = false
+            val sansVo = sourceAudio.sansVo.first()
             while (true) {
                 val active = _sources.value as? SourcesState.Active
                 if (active == null) {
                     _quickPlay.value = QuickPlayState.Idle
                     return@launch
                 }
-                val next = nextLinkFor(
+                val next = lienSuivant(
                     active.links,
                     preferred = lang,
                     excluded = tried,
                     heights = _heights.value,
                     trust = trustNow,
+                    sansVo = sansVo,
+                    differeAutorise = !active.anyLoading && !differeEssaye,
                 )
                 if (next != null && catalogueDeTeteAttendu(active.providers, next, toursDePatience)) {
                     if (toursDePatience == 0) {
@@ -1391,10 +1428,14 @@ class DetailsViewModel : ViewModel() {
                 }
                 if (next != null) {
                     tried += next.url
+                    if (next.deferred) differeEssaye = true
                     // Affiche l'hébergeur en cours d'essai : la cascade devient
                     // visible au lieu de laisser l'utilisateur devant un écran
-                    // d'attente muet.
-                    _quickPlay.value = QuickPlayState.Searching(hosterLabel(next), hoster = hosterLabel(next))
+                    // d'attente muet. Et dit quand c'est le debrid qu'on attend.
+                    _quickPlay.value = QuickPlayState.Searching(
+                        if (next.deferred) "${hosterLabel(next)} · Real-Debrid récupère le fichier" else hosterLabel(next),
+                        hoster = hosterLabel(next),
+                    )
                     val chronoResolution = Chrono.debut("lecture : résolution ${next.hoster}")
                     val stream = runCatching { ExtractorRegistry.resolve(next) }.getOrNull()
                     chronoResolution.fin()
@@ -1471,20 +1512,40 @@ class DetailsViewModel : ViewModel() {
     fun play(link: EmbedLink) {
         chronoLecture = Chrono.debut("lecture : résolution de ${link.hoster}")
         _resolveError.value = null
-        // Un titre téléchargé se lit depuis le disque, sans toucher au réseau —
-        // ni pour résoudre, ni pour vérifier que le flux répond. C'est ce qui
-        // fait qu'« hors ligne » veut dire hors ligne, et non « plus rapide ».
-        pendingMeta?.key?.let { key ->
-            localStream(key)?.let { local ->
-                viewModelScope.launch { registerUnlessCast(pendingMeta) }
-                playingLink = null
-                livre(local)
-                return
-            }
-        }
         _resolving.value = link.url
         val gen = ++resolveGen
         viewModelScope.launch {
+            // Un titre téléchargé se lit depuis le disque, sans toucher au
+            // réseau — ni pour résoudre, ni pour vérifier que le flux répond.
+            // C'est ce qui fait qu'« hors ligne » veut dire hors ligne, et non
+            // « plus rapide ». **Mais seulement pour la source téléchargée** :
+            // choisir une autre version dans le panneau doit la jouer, elle.
+            // Mesuré sur Castamar le 10/10/2026 : un « MultiLang » sans piste
+            // espagnole téléchargé, et chaque version espagnole choisie
+            // rejouait le fichier du disque.
+            pendingMeta?.key?.let { key ->
+                val local = localStream(key) ?: return@let
+                val telechargee = DownloadRepository().downloads.first().firstOrNull { it.key == key }
+                val memeSource = telechargee == null || telechargee.sourceUrl.isBlank() ||
+                    telechargee.sourceUrl == link.url
+                if (!memeSource) {
+                    Chrono.repere("lecture : fichier local ignoré, une autre version est choisie (${link.hoster})")
+                    return@let
+                }
+                if (gen != resolveGen) return@launch
+                _resolving.value = null
+                registerUnlessCast(pendingMeta)
+                playingLink = null
+                livre(local)
+                return@launch
+            }
+            // Un lien différé peut prendre des minutes : on le dit.
+            if (link.deferred) {
+                _quickPlay.value = QuickPlayState.Searching(
+                    "${hosterLabel(link)} · Real-Debrid récupère le fichier",
+                    hoster = hosterLabel(link),
+                )
+            }
             val stream = runCatching { ExtractorRegistry.resolve(link) }.getOrNull()
                 // Une URL bien formée ne veut pas dire un flux servi. Vidzy rend
                 // par exemple une playlist signée que son CDN refuse ensuite en
@@ -1498,6 +1559,7 @@ class DetailsViewModel : ViewModel() {
             // c'est la résolution la plus récente qui les porte.
             if (gen != resolveGen) return@launch
             _resolving.value = null
+            if (link.deferred) _quickPlay.value = QuickPlayState.Idle
             if (stream != null) {
                 // La lecture va démarrer : persiste les métadonnées pour le
                 // rail « Reprendre » (la position suivra depuis le lecteur).
@@ -1798,6 +1860,7 @@ class DetailsViewModel : ViewModel() {
             tv.details.year,
             season,
             episode,
+            originalLanguage = tv.details.originalLanguage,
         )
         val answered = mutableSetOf<String>()
         val links = coroutineScope {

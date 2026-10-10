@@ -842,6 +842,9 @@ class MainActivity : ComponentActivity() {
                                     nav.pop()
                                     detailsViewModel.retryAfterPlaybackFailure()
                                 },
+                                // Les pistes audio du fichier : la fiche retient
+                                // les sources sans VO pour ne plus les choisir.
+                                onAudioTracks = detailsViewModel::audioTracksObserved,
                                 // Passer le générique d'un épisode → enchaîne le
                                 // suivant via la fiche (résolution + lecture auto).
                                 onNextEpisode = { tmdbId, season, episode ->
