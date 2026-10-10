@@ -384,13 +384,25 @@ class PlayerSubtitlesViewModel : ViewModel() {
 
     fun resetTiming() = apply(SubtitleTiming(offsetMs = 0, scale = 1.0))
 
-    /** Retire le sous-titre externe sans oublier ce qui a été téléchargé. */
+    /**
+     * Retire le sous-titre externe sans oublier ce qui a été téléchargé, et
+     * **sans rien retenir** : c'est ce qu'il se passe quand on choisit une
+     * piste intégrée du fichier, qui remplace la nôtre à l'écran mais ne dit
+     * pas « plus de sous-titres ». Mesuré le 10/10/2026 sur One Piece : un
+     * appui sur une piste intégrée était retenu comme « coupés par
+     * l'utilisateur », et l'épisode ne recevait plus jamais le français
+     * d'office (« sous-titres : auto …, coupés par l'utilisateur »).
+     */
     fun clear() {
-        // « Désactivés » est un choix comme un autre : retenu pour ce titre.
-        viewModelScope.launch { choix.rememberOff(mediaKey) }
         original = null
         _state.value = _state.value.copy(active = null, timing = SubtitleTiming.None)
         _file.value = null
+    }
+
+    /** « Désactivés », choisi dans le menu : un choix comme un autre, retenu pour ce titre. */
+    fun turnOff() {
+        viewModelScope.launch { choix.rememberOff(mediaKey) }
+        clear()
     }
 
     /** À la sortie du lecteur : les versions dérivées n'ont plus d'utilité. */

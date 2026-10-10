@@ -1671,8 +1671,10 @@ fun PlayerScreen(
                 sections = listOfNotNull(
                     subtitleSection(tracks) { trackId ->
                         // Choisir une piste intégrée retire le sous-titre externe :
-                        // les deux affichés ensemble se chevauchent.
-                        subsViewModel.clear()
+                        // les deux affichés ensemble se chevauchent. Seul
+                        // « Désactivés » (trackId nul) vaut décision de ne plus
+                        // en vouloir, et se retient pour l'épisode.
+                        if (trackId == null) subsViewModel.turnOff() else subsViewModel.clear()
                         controller.selectSubtitle(trackId)
                         tracks = controller.tracks()
                         dialog = null
