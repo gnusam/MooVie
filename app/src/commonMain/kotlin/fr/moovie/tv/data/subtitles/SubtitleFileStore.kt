@@ -72,10 +72,21 @@ class SubtitleFileStore(
      * toutes les étapes, les répliques pas encore traduites y figurant dans leur
      * langue d'origine.
      */
-    fun storeTranslated(mediaKey: String, candidate: SubtitleCandidate, content: String): Path {
+    /**
+     * Écrit la traduction, **partielle ou complète** — deux noms distincts.
+     *
+     * Mesuré le 10/10/2026 sur One Piece : la traduction écrivait ses états
+     * intermédiaires sous le nom du fichier final ; une traduction interrompue
+     * (sortie du lecteur, changement de piste) laissait un fichier à 2441
+     * répliques sur 2483, que la reprise suivante « réutilisait » comme
+     * complet : du français, puis plus rien sur la fin de l'épisode.
+     */
+    fun storeTranslated(mediaKey: String, candidate: SubtitleCandidate, content: String, complete: Boolean): Path {
         fs.createDirectories(dir)
-        val fichier = dir / "${safe(mediaKey)}_${safe(candidate.fileId)}_trad.srt"
+        val base = "${safe(mediaKey)}_${safe(candidate.fileId)}_trad"
+        val fichier = dir / (if (complete) "$base.srt" else "${base}_partiel.srt")
         fs.write(fichier) { writeUtf8(content) }
+        if (complete) runCatching { fs.delete(dir / "${base}_partiel.srt") }
         return fichier
     }
 

@@ -140,6 +140,7 @@
     <string name="player_chaining_next">Chargement de l'épisode suivant…</string>
     <string name="player_subtitles">Sous-titres</string>
     <string name="player_subtitles_off">Désactivés</string>
+    <string name="player_subtitles_embedded">Pistes du fichier · non traduisibles</string>
     <string name="player_audio">Piste audio</string>
     <string name="player_settings">Paramètres</string>
     <string name="player_pip">Réduire en vignette</string>

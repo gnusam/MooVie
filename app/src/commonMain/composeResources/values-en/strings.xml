@@ -138,6 +138,7 @@
     <string name="player_chaining_next">Loading the next episode…</string>
     <string name="player_subtitles">Subtitles</string>
     <string name="player_subtitles_off">Off</string>
+    <string name="player_subtitles_embedded">Tracks in the file · not translatable</string>
     <string name="player_audio">Audio track</string>
     <string name="player_settings">Settings</string>
     <string name="player_pip">Picture-in-picture</string>

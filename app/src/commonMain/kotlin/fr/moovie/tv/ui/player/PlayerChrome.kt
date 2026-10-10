@@ -97,6 +97,7 @@ import fr.moovie.tv.resources.player_quality_auto
 import fr.moovie.tv.resources.player_speed
 import fr.moovie.tv.resources.player_subtitles
 import fr.moovie.tv.resources.player_subtitles_off
+import fr.moovie.tv.resources.player_subtitles_embedded
 import fr.moovie.tv.resources.player_update_chip
 import fr.moovie.tv.ui.theme.MOOVIE_ACCENT
 import fr.moovie.tv.ui.components.MoovieButton
@@ -817,7 +818,11 @@ fun subtitleSection(tracks: PlayerTracks, onSelect: (String?) -> Unit): PlayerOp
             add(PlayerOption(track.label, track.selected) { onSelect(track.id) })
         }
     }
-    return PlayerOptionSection(stringResource(Res.string.player_subtitles), options)
+    // Le titre dit ce que sont ces pistes : celles du fichier vidéo, qui
+    // s'affichent telles quelles et ne passent pas par la traduction. Sam,
+    // 10/10/2026, après avoir choisi « Full Subtitles » en attendant du
+    // français : « la traduction en français, elle se déclenche jamais ».
+    return PlayerOptionSection(stringResource(Res.string.player_subtitles_embedded), options)
 }
 
 /** Section « Piste audio ». Une seule piste = rien à choisir, section vide. */

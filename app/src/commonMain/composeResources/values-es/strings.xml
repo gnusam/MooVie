@@ -138,6 +138,7 @@
     <string name="player_chaining_next">Cargando el episodio siguiente…</string>
     <string name="player_subtitles">Subtítulos</string>
     <string name="player_subtitles_off">Desactivados</string>
+    <string name="player_subtitles_embedded">Pistas del archivo · no traducibles</string>
     <string name="player_audio">Pista de audio</string>
     <string name="player_settings">Ajustes</string>
     <string name="player_pip">Ventana flotante</string>

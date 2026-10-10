@@ -377,7 +377,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
         var publieA = 0L
         val traduits = translateCues(cues, translator, parallelism = LOTS_EN_VOL) { partiel, faites ->
             if (gen != traductionGen) throw CancellationException("sous-titre changé pendant la traduction")
-            val fichier = files.storeTranslated(mediaKey, candidate, renderSrt(partiel))
+            val fichier = files.storeTranslated(mediaKey, candidate, renderSrt(partiel), complete = false)
             original = fichier
             _state.value = _state.value.copy(translated = faites to cues.size)
             val maintenant = maintenantMs()
@@ -387,7 +387,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
             }
         }
         if (gen != traductionGen) return
-        original = files.storeTranslated(mediaKey, candidate, renderSrt(traduits))
+        original = files.storeTranslated(mediaKey, candidate, renderSrt(traduits), complete = true)
         _state.value = _state.value.copy(translated = null, translatedDone = true)
         Chrono.repere("sous-titres : traduction finie -> $original")
         publish(_state.value.timing)
