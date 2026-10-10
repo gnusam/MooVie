@@ -55,30 +55,48 @@ class QuickPlayPriorityTest {
         url = "https://t/resolve/realdebrid/K/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/null/0/b.mkv",
         deferred = true,
     )
+    private val repondus = etat("stremio" to ProviderStatus.DONE, "vidapi" to ProviderStatus.DONE)
+    private val vidapiSeul = etat("stremio" to ProviderStatus.LOADING, "vidapi" to ProviderStatus.DONE)
 
-    private fun suivant(links: List<EmbedLink>, sansVo: Set<String> = emptySet(), differeAutorise: Boolean = false, lang: String = "VO") =
-        lienSuivant(links, lang, emptySet(), emptyMap(), emptyMap(), sansVo, differeAutorise)
+    private fun suivant(
+        links: List<EmbedLink>,
+        sansVo: Set<String> = emptySet(),
+        providers: List<ProviderProgress> = repondus,
+        differeDejaEssaye: Boolean = false,
+        lang: String = "VO",
+    ) = lienSuivant(links, lang, emptySet(), emptyMap(), emptyMap(), sansVo, providers, differeDejaEssaye)?.url
 
     @Test
-    fun `un lien immediat passe toujours devant un lien differe`() {
-        assertEquals(cache.url, suivant(listOf(differe, cache), differeAutorise = true)?.id())
+    fun `un lien immediat de la tete passe devant son lien differe`() {
+        assertEquals(cache.url, suivant(listOf(differe, cache)))
     }
 
     @Test
-    fun `un lien differe n'est pris que si on l'autorise`() {
-        assertEquals(null, suivant(listOf(differe)))
-        assertEquals(differe.url, suivant(listOf(differe), differeAutorise = true)?.id())
+    fun `le differe de la tete passe devant l'immediat d'un autre catalogue`() {
+        assertEquals(differe.url, suivant(listOf(lien("vidapi"), differe)))
+    }
+
+    @Test
+    fun `le differe de la tete attend que la tete ait repondu, puis un seul essai`() {
+        val vidapi = lien("vidapi")
+        assertEquals(vidapi.url, suivant(listOf(vidapi, differe), providers = vidapiSeul))
+        assertEquals(vidapi.url, suivant(listOf(vidapi, differe), differeDejaEssaye = true))
+    }
+
+    @Test
+    fun `un differe d'un autre catalogue n'est pris qu'une fois tous repondus`() {
+        val autre = differe.copy(provider = "vidapi", url = "https://v/x.mp4")
+        assertEquals(null, suivant(listOf(autre), providers = vidapiSeul))
+        assertEquals(autre.url, suivant(listOf(autre)))
     }
 
     @Test
     fun `une source connue sans VO est ecartee pour la VO, pas pour la VF`() {
         val sansVo = setOf("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        assertEquals(differe.url, suivant(listOf(cache, differe), sansVo, differeAutorise = true)?.id())
+        assertEquals(differe.url, suivant(listOf(cache, differe), sansVo))
         val vf = cache.copy(language = "VF")
-        assertEquals(vf.url, suivant(listOf(vf), sansVo, lang = "VF")?.id())
+        assertEquals(vf.url, suivant(listOf(vf), sansVo, lang = "VF"))
     }
-
-    private fun EmbedLink.id() = url
 
     @Test
     fun `le souvenir ne compte que s'il vient de la tete`() {
