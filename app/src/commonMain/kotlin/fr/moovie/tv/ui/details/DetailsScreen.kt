@@ -1168,12 +1168,10 @@ fun DetailsScreenContent(
                                 // telle.** Au repos, un MoovieButton n'est que
                                 // son libellé : posé au milieu de quatre autres,
                                 // « Lire » ne se distinguait de « Sources » que
-                                // par le mot. `selected` lui donne la surface
-                                // pleine du thème, et la marge le fait peser —
-                                // c'est le gros bouton de la maquette, obtenu
-                                // avec le bouton du projet plutôt qu'avec un
-                                // second modèle à entretenir.
-                                selected = true,
+                                // par le mot. Le remplissage et la marge le font
+                                // peser — c'est le gros bouton de la maquette,
+                                // obtenu avec le bouton du projet plutôt qu'avec
+                                // un second modèle à entretenir.
                                 contentPadding = PaddingValues(
                                     horizontal = 24.dp,
                                     vertical = if (compact) 16.dp else 20.dp,
@@ -1204,7 +1202,11 @@ fun DetailsScreenContent(
                                         }
                                         loadingSources -> {
                                             CircularProgressIndicator(
-                                                color = MOOVIE_ACCENT,
+                                                // La couleur du contenu, pas
+                                                // celle du bouton : magenta sur
+                                                // le magenta du repos, il ne se
+                                                // voyait pas.
+                                                color = LocalContentColor.current,
                                                 strokeWidth = 2.dp,
                                                 modifier = Modifier.size(14.dp),
                                             )
@@ -2969,7 +2971,6 @@ private fun EpisodeDetail(
                 .fillMaxWidth()
                 .widthIn(max = LARGEUR_MAX_BOUTON_PRINCIPAL),
             remplissage = MOOVIE_ACCENT,
-            selected = true,
             contentPadding = PaddingValues(
                 horizontal = 24.dp,
                 vertical = if (compact) 16.dp else 20.dp,
@@ -3412,13 +3413,14 @@ private fun BoutonLireEpisode(
             .fillMaxWidth()
             .widthIn(max = LARGEUR_MAX_BOUTON_PRINCIPAL),
         remplissage = MOOVIE_ACCENT,
-        selected = true,
         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp),
     ) {
         LibellePrincipal {
             if (searching) {
                 CircularProgressIndicator(
-                    color = Color.White,
+                    // Blanc sur le blanc du focus, l'anneau disparaissait
+                    // juste au moment où on venait d'appuyer.
+                    color = LocalContentColor.current,
                     strokeWidth = 2.dp,
                     modifier = Modifier.size(14.dp),
                 )
