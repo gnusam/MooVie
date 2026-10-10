@@ -3,6 +3,7 @@ package fr.moovie.tv.data.subtitles
 import fr.moovie.tv.core.sources.model.MediaRef
 import fr.moovie.tv.core.subtitles.model.DownloadedSubtitle
 import fr.moovie.tv.core.subtitles.model.SubtitleCandidate
+import fr.moovie.tv.core.subtitles.model.VideoIdentity
 import fr.moovie.tv.core.subtitles.model.SubtitleQuota
 import fr.moovie.tv.core.subtitles.port.SubtitleCatalog
 import fr.moovie.tv.data.net.clientRest
@@ -71,6 +72,7 @@ class StremioSubtitleCatalog(
     override suspend fun search(
         media: MediaRef,
         languages: List<String>,
+        video: VideoIdentity?,
     ): List<SubtitleCandidate> {
         if (!available || languages.isEmpty()) return emptyList()
 
@@ -83,8 +85,11 @@ class StremioSubtitleCatalog(
         }
 
         val voulues = languages.map { it.lowercase() }.toSet()
+        // Les « extras » du protocole Stremio : l'addon OpenSubtitles range en
+        // tête les dépôts faits pour ce fichier exact.
+        val extras = video?.let { "/videoHash=${it.hash}&videoSize=${it.sizeBytes}" }.orEmpty()
         val body = runCatching {
-            clientRest.get("${addonUrl.trimEnd('/')}/subtitles/$type/$id.json") {
+            clientRest.get("${addonUrl.trimEnd('/')}/subtitles/$type/$id$extras.json") {
                 header("User-Agent", UA)
             }.body<String>()
         }.getOrNull() ?: return emptyList()

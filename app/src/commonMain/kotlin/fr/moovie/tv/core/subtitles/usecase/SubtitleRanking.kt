@@ -65,7 +65,14 @@ fun rankSubtitles(
      * reprenait le Brotherhood.
      */
     episodeTitles: List<String> = emptyList(),
+    /**
+     * Nom du fichier joué, pour reconnaître les releases du même groupe : un
+     * sous-titre fait pour `…-FORSEE` est calé sur notre `…-FORSEE`. Vient
+     * après l'empreinte exacte, avant tout le reste.
+     */
+    sourceRelease: String? = null,
 ): List<SubtitleCandidate> {
+    val groupe = releaseGroup(sourceRelease)
     val langOrder = preferredLanguages.map { it.lowercase() }
     val stream = normalizeFps(streamFps)
     val titres = (listOfNotNull(episodeTitle) + episodeTitles)
@@ -78,6 +85,11 @@ fun rankSubtitles(
             langOrder.indexOf(candidate.language.lowercase())
                 .takeIf { it >= 0 } ?: langOrder.size
         }
+            // L'empreinte exacte du fichier d'abord : ce sous-titre a été déposé
+            // pour ce fichier-là, il est calé par construction. Puis le même
+            // groupe de release, même montage à coup sûr.
+            .thenBy { if (it.hashMatch) 0 else 1 }
+            .thenBy { if (sameReleaseGroup(it.release, groupe)) 0 else 1 }
             // Le *type* de sous-titre avant sa synchronisation : un « forcé »
             // parfaitement calé reste le mauvais contenu, là où une cadence qui
             // ne correspond pas se corrige. Constaté sur la sonde, où un

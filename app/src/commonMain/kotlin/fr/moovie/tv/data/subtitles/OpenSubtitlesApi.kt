@@ -44,6 +44,8 @@ data class OsAttributes(
     @SerialName("foreign_parts_only") val foreignPartsOnly: Boolean = false,
     @SerialName("ai_translated") val aiTranslated: Boolean = false,
     @SerialName("machine_translated") val machineTranslated: Boolean = false,
+    /** Vrai quand la recherche portait une empreinte et que ce dépôt la porte aussi. */
+    @SerialName("moviehash_match") val movieHashMatch: Boolean = false,
     val files: List<OsFile> = emptyList(),
 )
 
@@ -156,6 +158,8 @@ class OpenSubtitlesApi(
         languages: List<String>,
         season: Int? = null,
         episode: Int? = null,
+        /** Empreinte du fichier joué : les dépôts qui la portent reviennent marqués. */
+        moviehash: String? = null,
     ): Result<OsSearchResponse> {
         val params = buildMap {
             // Uniquement des valeurs utiles : la doc supprime les défauts, les
@@ -164,6 +168,7 @@ class OpenSubtitlesApi(
             put("tmdb_id", tmdbId.toString())
             season?.let { put("season_number", it.toString()) }
             episode?.let { put("episode_number", it.toString()) }
+            moviehash?.takeIf { it.isNotBlank() }?.let { put("moviehash", it.lowercase()) }
         }
         val query = params.entries
             // Tri alphabétique exigé par la doc, « page » comprise.

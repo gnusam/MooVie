@@ -4,6 +4,7 @@ import kotlin.concurrent.Volatile
 import fr.moovie.tv.core.sources.model.MediaRef
 import fr.moovie.tv.core.subtitles.model.DownloadedSubtitle
 import fr.moovie.tv.core.subtitles.model.SubtitleCandidate
+import fr.moovie.tv.core.subtitles.model.VideoIdentity
 import fr.moovie.tv.core.subtitles.model.SubtitleQuota
 import fr.moovie.tv.core.subtitles.port.SubtitleCatalog
 import fr.moovie.tv.shared.openSubtitlesApiKey
@@ -34,6 +35,7 @@ class OpenSubtitlesCatalog(
     override suspend fun search(
         media: MediaRef,
         languages: List<String>,
+        video: VideoIdentity?,
     ): List<SubtitleCandidate> {
         if (!available || languages.isEmpty()) return emptyList()
         val episode = media as? MediaRef.Episode
@@ -43,6 +45,7 @@ class OpenSubtitlesCatalog(
             languages = languages,
             season = episode?.season,
             episode = episode?.episode,
+            moviehash = video?.hash,
         ).map { response ->
             response.data.flatMap { it.toCandidates() }
         }.getOrDefault(emptyList())
@@ -118,6 +121,7 @@ private fun OsSubtitle.toCandidates(): List<SubtitleCandidate> {
                 foreignPartsOnly = attributes.foreignPartsOnly,
                 aiTranslated = attributes.aiTranslated,
                 machineTranslated = attributes.machineTranslated,
+                hashMatch = attributes.movieHashMatch,
             )
         }
 }

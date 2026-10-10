@@ -8,6 +8,11 @@ import fr.moovie.tv.shared.maintenantMs
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import fr.moovie.tv.core.sources.model.MediaRef
+import fr.moovie.tv.core.sources.model.PlayableStream
+import fr.moovie.tv.core.subtitles.model.VideoIdentity
+import fr.moovie.tv.data.sources.ExtractorRegistry
+import fr.moovie.tv.data.subtitles.videoIdentity
+import io.ktor.http.decodeURLPart
 import fr.moovie.tv.core.subtitles.model.SubtitleCandidate
 import fr.moovie.tv.core.subtitles.model.SubtitleQuota
 import fr.moovie.tv.core.subtitles.usecase.SubtitleTiming
@@ -28,6 +33,7 @@ import fr.moovie.tv.data.subtitles.OpenSubtitlesSession
 import fr.moovie.tv.data.subtitles.SubtitleFileStore
 import fr.moovie.tv.shared.openSubtitlesApiKey
 import fr.moovie.tv.ui.player.parseMediaKey
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -132,11 +138,31 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * Cherche les sous-titres du média en cours. [title] sert de repli quand la
      * clé de lecture ne porte pas d'identifiant TMDB exploitable.
      */
-    fun load(mediaKey: String, title: String, streamFps: Double, episodeTitle: String = "") = io {
+    fun load(
+        mediaKey: String,
+        title: String,
+        streamFps: Double,
+        episodeTitle: String = "",
+        stream: PlayableStream? = null,
+    ) = io {
         // Idempotent : les écrans peuvent l'appeler à chaque ouverture du menu.
         // Ce n'est plus à eux de deviner si la liste est celle du bon épisode.
         if (this.mediaKey == mediaKey && _state.value.candidates.isNotEmpty()) return@io
-        search(mediaKey, title, streamFps, episodeTitle)
+        search(mediaKey, title, streamFps, episodeTitle, stream)
+    }
+
+    /**
+     * L'empreinte du fichier joué, calculée une fois par média et par flux :
+     * deux lectures de 64 Kio, inutiles à refaire à chaque ouverture du menu.
+     */
+    private var empreinte: Triple<String, String, VideoIdentity?>? = null
+
+    private suspend fun empreinteDe(mediaKey: String, stream: PlayableStream?): VideoIdentity? {
+        val flux = stream ?: return null
+        empreinte?.takeIf { it.first == mediaKey && it.second == flux.url }?.let { return it.third }
+        val calculee = videoIdentity(ExtractorRegistry.gateway, flux)
+        empreinte = Triple(mediaKey, flux.url, calculee)
+        return calculee
     }
 
     /**
@@ -155,7 +181,13 @@ class PlayerSubtitlesViewModel : ViewModel() {
         }
     }
 
-    private suspend fun search(mediaKey: String, title: String, streamFps: Double, episodeTitle: String = "") {
+    private suspend fun search(
+        mediaKey: String,
+        title: String,
+        streamFps: Double,
+        episodeTitle: String = "",
+        stream: PlayableStream? = null,
+    ) {
         if (!_state.value.available) return
         enter(mediaKey)
         this.mediaKey = mediaKey
@@ -173,7 +205,12 @@ class PlayerSubtitlesViewModel : ViewModel() {
         session.renewIfNeeded(maintenantMs())
 
         val languages = settings.subtitleLanguages.first()
-        val found = catalog.search(media, languages)
+        // L'empreinte du fichier, puis la recherche avec : les dépôts faits
+        // pour ce fichier exact reviennent marqués et passent en tête.
+        val identite = empreinteDe(mediaKey, stream)
+        val found = catalog.search(media, languages, identite)
+        val nomFichier = stream?.url?.substringBefore('?')?.substringAfterLast('/')
+            ?.let { runCatching { it.decodeURLPart() }.getOrDefault(it) }
         // Le titre anglais de l'épisode, pour reconnaître les releases : TMDB
         // est interrogé en français partout ailleurs. Un appel, en échec
         // silencieux — le classement se passe de lui, en moins bien.
@@ -187,7 +224,8 @@ class PlayerSubtitlesViewModel : ViewModel() {
         }
         Chrono.repere("sous-titres : titre de l'épisode « $episodeTitle », en anglais « ${titreAnglais.orEmpty()} »")
         Chrono.repere(
-            "sous-titres : recherche $mediaKey ($media) -> ${found.size} candidats ; premiers : " +
+            "sous-titres : recherche $mediaKey ($media) -> ${found.size} candidats, " +
+                "${found.count { it.hashMatch }} à l'empreinte, fichier « ${nomFichier.orEmpty()} » ; premiers : " +
                 found.take(3).joinToString(" | ") { "${it.language} ${it.fileId} ${it.release.take(40)}" },
         )
         _state.value = _state.value.copy(
@@ -204,6 +242,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
                 preferForced = settings.subtitlePreferForced.first(),
                 episodeTitle = episodeTitle.takeIf { it.isNotBlank() },
                 episodeTitles = listOfNotNull(titreAnglais?.takeIf { it.isNotBlank() }),
+                sourceRelease = nomFichier,
             ),
             trouble = if (found.isEmpty()) SubtitleTrouble.NOTHING_FOUND else null,
             quota = catalog.quota(),
@@ -310,10 +349,21 @@ class PlayerSubtitlesViewModel : ViewModel() {
      */
     fun translate() = io { translateActive() }
 
+    /**
+     * Génération de la traduction en cours : changer de sous-titre l'incrémente,
+     * et la traduction qui tourne encore s'arrête au lot suivant au lieu de
+     * republier son fichier. Mesuré le 10/10/2026 sur One Piece : la piste
+     * intégrée choisie par Sam était effacée vingt secondes plus tard par la
+     * traduction du sous-titre en ligne qu'il venait de quitter (« quand je le
+     * sélectionne, ça affiche rien du tout »).
+     */
+    private var traductionGen = 0
+
     private suspend fun translateActive() {
         val candidate = _state.value.active ?: return
         val source = original ?: return
         if (!translator.configured || _state.value.translated != null) return
+        val gen = ++traductionGen
 
         val cues = parseSrt(files.read(source) ?: return)
         if (cues.isEmpty()) return
@@ -326,6 +376,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
         // rechargements tombaient en vingt secondes.
         var publieA = 0L
         val traduits = translateCues(cues, translator, parallelism = LOTS_EN_VOL) { partiel, faites ->
+            if (gen != traductionGen) throw CancellationException("sous-titre changé pendant la traduction")
             val fichier = files.storeTranslated(mediaKey, candidate, renderSrt(partiel))
             original = fichier
             _state.value = _state.value.copy(translated = faites to cues.size)
@@ -335,6 +386,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
                 publish(_state.value.timing)
             }
         }
+        if (gen != traductionGen) return
         original = files.storeTranslated(mediaKey, candidate, renderSrt(traduits))
         _state.value = _state.value.copy(translated = null, translatedDone = true)
         Chrono.repere("sous-titres : traduction finie -> $original")
@@ -355,7 +407,13 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * Ne fait rien si un sous-titre est déjà actif : un choix fait dans le
      * menu, ou une reprise, ne se fait pas écraser.
      */
-    fun autoFrench(mediaKey: String, title: String, streamFps: Double, episodeTitle: String = "") = io {
+    fun autoFrench(
+        mediaKey: String,
+        title: String,
+        streamFps: Double,
+        episodeTitle: String = "",
+        stream: PlayableStream? = null,
+    ) = io {
         if (_state.value.active != null) {
             Chrono.repere("sous-titres : auto $mediaKey, déjà actif ${_state.value.active?.fileId}, rien à faire")
             return@io
@@ -376,7 +434,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
             null -> Unit
         }
         if (_state.value.candidates.isEmpty() || this.mediaKey != mediaKey) {
-            search(mediaKey, title, streamFps, episodeTitle)
+            search(mediaKey, title, streamFps, episodeTitle, stream)
         }
         val candidates = _state.value.candidates
         val choisi = candidates.firstOrNull { it.language == "fr" }
@@ -412,8 +470,9 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * d'office (« sous-titres : auto …, coupés par l'utilisateur »).
      */
     fun clear() {
+        traductionGen++
         original = null
-        _state.value = _state.value.copy(active = null, timing = SubtitleTiming.None)
+        _state.value = _state.value.copy(active = null, timing = SubtitleTiming.None, translated = null)
         _file.value = null
     }
 
@@ -445,6 +504,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
      * disparaître parce qu'on a changé d'épisode.
      */
     fun reset() {
+        traductionGen++
         Chrono.repere("sous-titres : reset (média $mediaKey)")
         onLeave()
         original = null

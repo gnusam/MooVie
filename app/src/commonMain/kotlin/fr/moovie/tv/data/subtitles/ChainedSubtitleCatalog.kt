@@ -3,6 +3,7 @@ package fr.moovie.tv.data.subtitles
 import fr.moovie.tv.core.sources.model.MediaRef
 import fr.moovie.tv.core.subtitles.model.DownloadedSubtitle
 import fr.moovie.tv.core.subtitles.model.SubtitleCandidate
+import fr.moovie.tv.core.subtitles.model.VideoIdentity
 import fr.moovie.tv.core.subtitles.model.SubtitleQuota
 import fr.moovie.tv.core.subtitles.port.SubtitleCatalog
 import kotlin.concurrent.Volatile
@@ -53,12 +54,13 @@ class ChainedSubtitleCatalog(
     override suspend fun search(
         media: MediaRef,
         languages: List<String>,
+        video: VideoIdentity?,
     ): List<SubtitleCandidate> {
         for (catalog in catalogs) {
             if (!catalog.available) continue
             // Un catalogue qui lève ne doit pas priver l'utilisateur du suivant :
             // le port promet de ne pas lever, on ne parie pas dessus.
-            val trouves = runCatching { catalog.search(media, languages) }.getOrDefault(emptyList())
+            val trouves = runCatching { catalog.search(media, languages, video) }.getOrDefault(emptyList())
             if (trouves.isEmpty()) continue
             actif = catalog
             proprietaire.clear()

@@ -347,9 +347,19 @@ internal class ExoPlayerController(private val player: Player) : MooviePlayerCon
      */
     private fun Tracks.Group.trackLabel(index: Int): String {
         val format = getTrackFormat(index)
-        return format.label
-            ?: format.language?.takeIf { it.isNotBlank() && it != "und" }?.let(::languageName)
-            ?: "#${index + 1}"
+        val langue = format.language?.takeIf { it.isNotBlank() && it != "und" }?.let(::languageName)
+        val titre = format.label?.takeIf { it.isNotBlank() }
+        // La langue d'abord, le titre de l'encodeur ensuite : « Full subtitles »
+        // et « Episode name » tout seuls ne disent pas dans quelle langue ils
+        // sont — Sam, 10/10/2026 : « c'est quoi ces trucs de full subtitles qui
+        // apparaissent comme ça ? ». Le titre reste, il distingue deux pistes
+        // de même langue (dialogues complets contre pancartes seules).
+        return when {
+            langue != null && titre != null && !titre.equals(langue, ignoreCase = true) -> "$langue · $titre"
+            langue != null -> langue
+            titre != null -> titre
+            else -> "#${index + 1}"
+        }
     }
 
     private fun languageName(code: String): String {

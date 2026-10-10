@@ -4,6 +4,7 @@ import fr.moovie.tv.core.sources.model.MediaRef
 import fr.moovie.tv.core.subtitles.model.DownloadedSubtitle
 import fr.moovie.tv.core.subtitles.model.SubtitleCandidate
 import fr.moovie.tv.core.subtitles.model.SubtitleQuota
+import fr.moovie.tv.core.subtitles.model.VideoIdentity
 
 /**
  * Un catalogue de sous-titres.
@@ -34,7 +35,12 @@ interface SubtitleCatalog {
      * Gratuit et sans quota. Ne doit pas lever : un service injoignable est un
      * cas normal et rend une liste vide.
      */
-    suspend fun search(media: MediaRef, languages: List<String>): List<SubtitleCandidate>
+    /**
+     * @param video l'empreinte du fichier joué quand on a pu la calculer : les
+     *   catalogues qui la comprennent marquent les sous-titres déposés pour ce
+     *   fichier exact.
+     */
+    suspend fun search(media: MediaRef, languages: List<String>, video: VideoIdentity? = null): List<SubtitleCandidate>
 
     /**
      * Récupère le contenu d'un sous-titre. **Consomme le quota** : à n'appeler

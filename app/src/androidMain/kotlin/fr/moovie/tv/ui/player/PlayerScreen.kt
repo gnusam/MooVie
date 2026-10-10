@@ -1055,7 +1055,13 @@ fun PlayerScreen(
     LaunchedEffect(isPlaying) {
         if (autoSubsDone || !isPlaying || !language.equals("VO", ignoreCase = true)) return@LaunchedEffect
         autoSubsDone = true
-        subsViewModel.autoFrench(mediaKey, title, controller.videoFps(), episodeTitle = subtitle.substringAfter(" — ", ""))
+        subsViewModel.autoFrench(
+            mediaKey,
+            title,
+            controller.videoFps(),
+            episodeTitle = subtitle.substringAfter(" — ", ""),
+            stream = PlayableStream(streamUrl, StreamFormat.UNKNOWN, headers),
+        )
     }
 
     val chipVersion = updateVersion?.takeIf { updateChipFresh || controlsVisible }
@@ -1293,6 +1299,14 @@ fun PlayerScreen(
                 // se traite donc **avant** la question de la barre. Elle réveille
                 // les contrôles au passage, parce qu'on veut voir ce qu'on vient
                 // de faire.
+                // La touche « Sous-titres » de la télécommande ouvre le menu des
+                // sous-titres, pas le menu général. Sam, 10/10/2026 : « quand
+                // j'appuie dessus, ça m'affiche juste le menu général ».
+                if (event.key == Key.Captions) {
+                    dialog = PlayerDialogKind.SUBTITLES
+                    wake()
+                    return@onPreviewKeyEvent true
+                }
                 if (event.key in MEDIA_TOGGLE_KEYS) {
                     controller.togglePause()
                     wake()
@@ -1656,7 +1670,13 @@ fun PlayerScreen(
         // ce moment-là le flux est prêt, donc sa cadence est connue.
         LaunchedEffect(dialog) {
             if (dialog == PlayerDialogKind.SUBTITLES) {
-                subsViewModel.load(mediaKey, title, controller.videoFps(), episodeTitle = subtitle.substringAfter(" — ", ""))
+                subsViewModel.load(
+                    mediaKey,
+                    title,
+                    controller.videoFps(),
+                    episodeTitle = subtitle.substringAfter(" — ", ""),
+                    stream = PlayableStream(streamUrl, StreamFormat.UNKNOWN, headers),
+                )
             }
         }
 

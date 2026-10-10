@@ -28,6 +28,11 @@ data class SubtitleCandidate(
     val foreignPartsOnly: Boolean = false,
     val aiTranslated: Boolean = false,
     val machineTranslated: Boolean = false,
+    /**
+     * Déposé pour le fichier exact qu'on joue (empreinte identique) : calé par
+     * construction. Voir [VideoIdentity].
+     */
+    val hashMatch: Boolean = false,
 )
 
 /**
