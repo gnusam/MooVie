@@ -5,6 +5,9 @@ import fr.moovie.tv.resources.player_subtitles_translated
 import androidx.compose.runtime.Composable
 import fr.moovie.tv.core.subtitles.model.SubtitleCandidate
 import fr.moovie.tv.core.subtitles.usecase.COMMON_FPS
+import fr.moovie.tv.core.subtitles.usecase.orderForMenu
+import fr.moovie.tv.resources.player_subtitles_tried
+import fr.moovie.tv.resources.player_subtitles_try_next
 import fr.moovie.tv.resources.Res
 import fr.moovie.tv.resources.player_online_subtitles
 import fr.moovie.tv.resources.player_subtitles_downloaded
@@ -48,6 +51,7 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun onlineSubtitleSection(
     state: PlayerSubtitlesState,
+    onNext: () -> Unit = {},
     onPick: (SubtitleCandidate) -> Unit,
 ): PlayerOptionSection {
     val title = buildString {
@@ -70,9 +74,20 @@ fun onlineSubtitleSection(
             val mark = stringResource(Res.string.player_subtitles_downloaded)
             val traduit = stringResource(Res.string.player_subtitles_translated)
             val enCours = stringResource(Res.string.player_subtitles_translating_short)
-            state.candidates.take(MAX_SHOWN).map { candidate ->
+            val essaye = stringResource(Res.string.player_subtitles_tried)
+            val activeId = state.active?.fileId
+            // « Essayer le suivant » en tête tant qu'il en reste : une touche
+            // pour enchaîner, sans relire des noms de release illisibles.
+            val restants = state.candidates.count { it.fileId !in state.tried && it.fileId != activeId }
+            val suivant = if (restants > 0) {
+                listOf(PlayerOption(stringResource(Res.string.player_subtitles_try_next, restants), false) { onNext() })
+            } else {
+                emptyList()
+            }
+            suivant + orderForMenu(state.candidates, activeId, state.tried).take(MAX_SHOWN).map { candidate ->
                 val paid = candidate.fileId in state.downloaded
-                val actif = candidate.fileId == state.active?.fileId
+                val actif = candidate.fileId == activeId
+                val dejaEssaye = !actif && candidate.fileId in state.tried
                 // L'état de la traduction se lit sur la ligne active : c'est là
                 // qu'on regarde pour savoir ce qui s'affiche.
                 val etat = when {
@@ -85,7 +100,12 @@ fun onlineSubtitleSection(
                     // Le repère passe **en tête** : c'est l'information la plus
                     // actionnable de la ligne — gratuit ou non — et la seule que
                     // la troncature de la release ne doit jamais emporter.
-                    label = listOfNotNull(mark.takeIf { paid }, candidate.describe(), etat).joinToString(" · "),
+                    label = listOfNotNull(
+                        mark.takeIf { paid },
+                        candidate.describe(),
+                        etat,
+                        essaye.takeIf { dejaEssaye },
+                    ).joinToString(" · "),
                     selected = actif,
                 ) { onPick(candidate) }
             }

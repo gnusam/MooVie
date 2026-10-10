@@ -59,7 +59,34 @@ class SubtitleChoiceRepository {
         store.edit { it[stringPreferencesKey(key)] = json.encodeToString(Choix(off = true)) }
     }
 
+    /**
+     * Les sous-titres déjà activés sur ce titre, par identifiant de fichier.
+     *
+     * Sam, 10/10/2026 : « il faudrait pouvoir les disqualifier au fur et à
+     * mesure qu'on les teste, et ne pas être là à chaque fois à revenir dans
+     * le menu et se dire "celui-là, est-ce que je l'ai testé ou pas ?" ». Le
+     * menu les marque et les range après ceux qu'on n'a pas encore essayés ;
+     * ça survit à la sortie du lecteur, la mémoire des noms de release ne
+     * survivant, elle, à rien.
+     */
+    suspend fun tried(key: String): Set<String> {
+        if (key.isBlank()) return emptySet()
+        return store.data.first()[stringPreferencesKey(TRIED + key)]
+            ?.split(',')?.filter { it.isNotBlank() }?.toSet().orEmpty()
+    }
+
+    suspend fun markTried(key: String, fileId: String) {
+        if (key.isBlank() || fileId.isBlank()) return
+        store.edit { prefs ->
+            val k = stringPreferencesKey(TRIED + key)
+            val actuels = prefs[k]?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+            if (fileId !in actuels) prefs[k] = (actuels + fileId).takeLast(PLAFOND_ESSAYES).joinToString(",")
+        }
+    }
+
     private companion object {
         const val STORE = "moovie_subtitle_choice"
+        const val TRIED = "tried:"
+        const val PLAFOND_ESSAYES = 60
     }
 }

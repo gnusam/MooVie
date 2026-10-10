@@ -47,6 +47,8 @@ data class PlayerSubtitlesState(
     val active: SubtitleCandidate? = null,
     /** Identifiants déjà sur disque : les rejouer ne coûte rien. */
     val downloaded: Set<String> = emptySet(),
+    /** Identifiants déjà activés sur ce titre, à marquer et à ranger après les autres. */
+    val tried: Set<String> = emptySet(),
     val timing: SubtitleTiming = SubtitleTiming.None,
     val quota: SubtitleQuota = SubtitleQuota.Unknown,
     val trouble: SubtitleTrouble? = null,
@@ -206,7 +208,20 @@ class PlayerSubtitlesViewModel : ViewModel() {
             trouble = if (found.isEmpty()) SubtitleTrouble.NOTHING_FOUND else null,
             quota = catalog.quota(),
             downloaded = files.storedIds(mediaKey),
+            tried = choix.tried(mediaKey),
         )
+    }
+
+    /**
+     * Le prochain sous-titre pas encore essayé, dans l'ordre du classement :
+     * une seule touche pour passer au suivant, sans relire la liste.
+     */
+    fun next() {
+        val s = _state.value
+        val suivant = s.candidates.firstOrNull { it.fileId !in s.tried && it.fileId != s.active?.fileId }
+            ?: return
+        Chrono.repere("sous-titres : suivant non essayé ${suivant.language} ${suivant.fileId}")
+        pick(suivant)
     }
 
     /**
@@ -229,6 +244,9 @@ class PlayerSubtitlesViewModel : ViewModel() {
      */
     private suspend fun activerEtTraduire(candidate: SubtitleCandidate) {
         if (!activate(candidate)) return
+        // Essayé, donc : marqué dans le menu et retenu pour ce titre.
+        _state.value = _state.value.copy(tried = _state.value.tried + candidate.fileId)
+        choix.markTried(mediaKey, candidate.fileId)
         if (candidate.language == "fr") return
         val deja = files.existingTranslated(mediaKey, candidate)
         if (deja != null) {

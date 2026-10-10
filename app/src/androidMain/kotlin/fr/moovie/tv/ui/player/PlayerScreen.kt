@@ -1679,7 +1679,13 @@ fun PlayerScreen(
                         tracks = controller.tracks()
                         dialog = null
                     },
-                    onlineSubtitleSection(subsState) { candidate ->
+                    onlineSubtitleSection(
+                        subsState,
+                        onNext = {
+                            subsViewModel.next()
+                            dialog = null
+                        },
+                    ) { candidate ->
                         subsViewModel.pick(candidate)
                         dialog = null
                     },
