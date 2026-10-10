@@ -19,7 +19,11 @@ object ProviderRegistry {
         // l'utilisateur n'a pas collé son addon dans les réglages : sans URL il
         // rend une liste vide sans émettre la moindre requête, et les sept
         // autres travaillent comme avant.
-        StremioProvider(ExtractorRegistry.gateway),
+        // `cachedOnly = false` : les versions que le debrid n'a pas encore
+        // remontent aussi, différées — c'est ce qui permet de choisir une
+        // vraie VO quand le seul fichier en cache n'en a pas (Castamar,
+        // 10/10/2026). Voir EmbedLink.deferred et StremioExtractor.
+        StremioProvider(ExtractorRegistry.gateway, cachedOnly = false),
         // Premier des catalogues *scrapés* : le seul d'entre eux qui rende le
         // fichier lui-même plutôt qu'un embed à désobfusquer. Rien à casser au
         // prochain changement de format, donc le plus sûr à essayer en premier

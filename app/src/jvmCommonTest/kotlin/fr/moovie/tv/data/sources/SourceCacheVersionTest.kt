@@ -24,7 +24,8 @@ class SourceCacheVersionTest {
 
     @Test
     fun `la version courante est acceptee`() {
-        assertTrue(writtenByRunningVersion(appVersionName))
+        assertTrue(writtenByRunningVersion(cacheStamp))
+        assertFalse(writtenByRunningVersion(appVersionName), "la version seule ne suffit plus : le format compte")
     }
 
     @Test

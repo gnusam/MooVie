@@ -71,6 +71,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import fr.moovie.tv.ui.adaptive.LocalUiFlavor
 import fr.moovie.tv.ui.adaptive.isTouchUi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PictureInPictureAlt
@@ -1518,7 +1519,12 @@ fun PlayerScreen(
                         }
                     }
                 },
-                onDownload = if (mediaKey.isNotBlank() && sourceUrl.isNotBlank()) {
+                // Pas à la télécommande : « ce bouton téléchargé pendant qu'on
+                // est en train de lire, il n'a aucun sens » (Sam, 10/10/2026).
+                // Le téléchargement se décide sur la fiche, où l'on choisit la
+                // source ; au doigt et à la souris il reste, le geste y est
+                // moins coûteux qu'un détour.
+                onDownload = if (LocalUiFlavor.current.isDirect && mediaKey.isNotBlank() && sourceUrl.isNotBlank()) {
                     {
                         // On cherche mieux avant de mettre en file : le fichier
                         // se garde, contrairement à la lecture qu'on a lancée

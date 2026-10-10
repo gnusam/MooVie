@@ -30,7 +30,18 @@ private const val TTL_MS = 6L * 60 * 60 * 1000
  * pas de DataStore, et l'invariant qui compte est cette comparaison, pas la
  * mécanique de lecture autour.
  */
-internal fun writtenByRunningVersion(version: String): Boolean = version == appVersionName
+internal fun writtenByRunningVersion(version: String): Boolean = version == cacheStamp
+
+/**
+ * Ce qu'une entrée doit porter pour être resservie : la version de l'app
+ * **et** le format de la liste. Le second change quand le sens des liens
+ * change sans que la version bouge — le 10/10/2026, les flux différés sont
+ * apparus dans les listes Stremio, et les entrées écrites avant n'en avaient
+ * aucun : six heures de fiches sans aucune version à récupérer.
+ */
+internal val cacheStamp: String get() = "$appVersionName/$FORMAT_LISTE"
+
+private const val FORMAT_LISTE = "2"
 
 /** Nombre max d'entrées conservées (purge des plus anciennes au-delà). */
 private const val MAX_ENTRIES = 80
@@ -113,7 +124,7 @@ class SourceCacheRepository {
         if (key.isBlank() || links.isEmpty()) return
         store.edit { prefs ->
             prefs[stringPreferencesKey(ENTRY_PREFIX + key)] = json.encodeToString(
-                CachedSources(links, maintenantMs(), providers.sorted(), appVersionName),
+                CachedSources(links, maintenantMs(), providers.sorted(), cacheStamp),
             )
             prune(prefs)
         }

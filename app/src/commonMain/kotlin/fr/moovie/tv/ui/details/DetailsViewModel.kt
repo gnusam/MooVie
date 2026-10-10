@@ -1220,7 +1220,12 @@ class DetailsViewModel : ViewModel() {
         if (!lacksOriginalAudio(tracks, original)) return
         val identite = sourceIdentity(link.url)
         Chrono.repere("lecture : ${link.hoster} n'a pas de piste « $original », source retenue comme sans VO ($identite)")
-        viewModelScope.launch { sourceAudio.marquerSansVo(identite) }
+        viewModelScope.launch {
+            sourceAudio.marquerSansVo(identite)
+            // La reprise ne doit pas la rejouer : c'est la cascade qui, la
+            // prochaine fois, ira chercher une version dans la bonne langue.
+            lastSource.forget(playbackKey)
+        }
     }
 
     fun retryAfterPlaybackFailure(): Boolean {
@@ -1358,10 +1363,21 @@ class DetailsViewModel : ViewModel() {
             // Un souvenir d'un catalogue secondaire ne passe pas devant la
             // tête : voir souvenirPrioritaire.
             val catalogueDeTete = activeProviders().firstOrNull()?.name
-            souvenirLu?.takeIf { !souvenirPrioritaire(it, catalogueDeTete) }?.let {
+            // Apprise en la jouant : une source sans VO ne se rejoue pas en VO,
+            // même mémorisée. Oubliée, pour que la cascade reprenne la main.
+            val souvenirSansVo = souvenirLu != null &&
+                souvenirLu.language.equals("VO", ignoreCase = true) &&
+                sourceIdentity(souvenirLu.url) in sourceAudio.sansVo.first()
+            if (souvenirSansVo) {
+                Chrono.repere("lecture : source mémorisée (${souvenirLu?.hoster}) ignorée, connue sans VO")
+                lastSource.forget(playbackKey)
+            }
+            souvenirLu?.takeIf { !souvenirSansVo && !souvenirPrioritaire(it, catalogueDeTete) }?.let {
                 Chrono.repere("lecture : source mémorisée (${it.hoster}) ignorée, ${catalogueDeTete} passe devant")
             }
-            souvenirLu?.takeIf { it.url !in rejectedLinks && souvenirPrioritaire(it, catalogueDeTete) }?.let { souvenir ->
+            souvenirLu?.takeIf {
+                it.url !in rejectedLinks && !souvenirSansVo && souvenirPrioritaire(it, catalogueDeTete)
+            }?.let { souvenir ->
                 Chrono.repere("lecture : source mémorisée (${souvenir.hoster}), réessai direct")
                 _quickPlay.value = QuickPlayState.Searching(hosterLabel(souvenir), hoster = hosterLabel(souvenir))
                 val chronoResolution = Chrono.debut("lecture : résolution ${souvenir.hoster}")
