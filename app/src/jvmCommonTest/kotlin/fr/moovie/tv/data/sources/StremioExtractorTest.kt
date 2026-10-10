@@ -43,14 +43,13 @@ class StremioExtractorTest {
     }
 
     @Test
-    fun `le carton en cours fait attendre, puis le fichier arrive`() {
-        val passerelle = redirige(
-            "https://torrentio.strem.fun/videos/downloading_v3.mp4",
-            "https://torrentio.strem.fun/videos/downloading_v3.mp4",
-            fichier,
-        )
-        val flux = runBlocking { StremioExtractor(passerelle, intervalleMs = 1).extract(lien) }
-        assertEquals(fichier, flux?.url)
+    fun `le carton en cours ne fait pas attendre, il se dit, et le fichier arrive au passage suivant`() {
+        val passerelle = redirige("https://torrentio.strem.fun/videos/downloading_v3.mp4", fichier)
+        val extracteur = StremioExtractor(passerelle)
+        assertNull(runBlocking { extracteur.extract(lien) }, "en cours : pas de flux, la main revient")
+        assertEquals(StremioExtractor.EtatDebrid.EN_COURS, StremioExtractor.etats.value[lien.url])
+        assertEquals(fichier, runBlocking { extracteur.extract(lien) }?.url)
+        assertEquals(StremioExtractor.EtatDebrid.PRET, StremioExtractor.etats.value[lien.url])
     }
 
     @Test

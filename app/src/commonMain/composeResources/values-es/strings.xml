@@ -98,6 +98,11 @@
     <string name="details_episodes_season">Episodios (temporada %1$d)</string>
     <string name="details_episode_header">%1$s · Temporada %2$d</string>
     <string name="details_no_player">Ningún reproductor %1$s funcionó.</string>
+    <string name="details_debrid_fetching">Real-Debrid está recuperando esta versión. Puedes seguir, la línea será reproducible en cuanto esté lista.</string>
+    <string name="details_debrid_ready">Lista en Real-Debrid: %1$s</string>
+    <string name="details_debrid_refused">Real-Debrid rechaza esta versión.</string>
+    <string name="details_debrid_slow">Real-Debrid no terminó en diez minutos: inténtalo más tarde.</string>
+    <string name="details_only_deferred">Nada se reproduce ahora mismo en %1$s. Las versiones « por recuperar » se piden con una pulsación; la ficha avisa cuando esté lista.</string>
     <string name="details_lang_missing">Sin fuente en %1$s — otros idiomas disponibles.</string>
     <string name="details_no_sources">No hay fuente disponible para este título.</string>
     <string name="details_sources_none_enabled">Ningún catálogo activado, en Ajustes → Fuentes.</string>

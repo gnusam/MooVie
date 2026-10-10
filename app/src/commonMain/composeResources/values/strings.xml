@@ -100,6 +100,11 @@
     <string name="details_episodes_season">Épisodes (saison %1$d)</string>
     <string name="details_episode_header">%1$s · Saison %2$d</string>
     <string name="details_no_player">Aucun lecteur %1$s n'a fonctionné.</string>
+    <string name="details_debrid_fetching">Real-Debrid récupère cette version. Tu peux continuer, la ligne deviendra jouable dès qu\'elle est prête.</string>
+    <string name="details_debrid_ready">Prête chez Real-Debrid : %1$s</string>
+    <string name="details_debrid_refused">Real-Debrid refuse cette version.</string>
+    <string name="details_debrid_slow">Real-Debrid n\'a pas fini en dix minutes : réessaie plus tard.</string>
+    <string name="details_only_deferred">Rien ne joue tout de suite en %1$s. Les versions « à récupérer » se demandent d\'un appui, la fiche prévient quand c\'est prêt.</string>
     <string name="details_lang_missing">Aucune source en %1$s — autres langues disponibles.</string>
     <string name="details_no_sources">Aucune source disponible pour ce titre.</string>
     <string name="details_sources_none_enabled">Aucun catalogue activé, dans Réglages → Sources.</string>

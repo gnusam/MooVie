@@ -8,9 +8,8 @@ import fr.moovie.tv.core.sources.port.HttpMethod
 import fr.moovie.tv.core.sources.port.HttpRequest
 import fr.moovie.tv.core.sources.port.SourceExtractor
 import fr.moovie.tv.shared.Chrono
-import kotlinx.coroutines.delay
-import kotlin.time.Duration.Companion.minutes
-import kotlin.time.TimeSource
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * Résout les liens de [StremioProvider], qui sont **presque** déjà des fichiers.
@@ -32,12 +31,11 @@ import kotlin.time.TimeSource
  *    Ce sont des MP4 valides de quelques secondes : laissés au lecteur, ils
  *    « jouent », et l'utilisateur voit un carton à la place de son épisode.
  *
- * Pour un lien marqué [EmbedLink.deferred], « en cours » n'est pas un échec :
- * on interroge l'aiguillage toutes les [INTERVALLE_MS] jusqu'à
- * [DELAI_RECUPERATION], le temps que Real-Debrid aille chercher le fichier.
- * Sam, 10/10/2026 : « soit il faut que j'aie un moyen de choisir une autre
- * version dans Torrentio, soit il faut proposer que des sources où il y a une
- * vraie piste espagnole ».
+ * Pour un lien marqué [EmbedLink.deferred], « en cours » n'est pas un échec
+ * mais pas un fichier non plus : l'extracteur le dit dans [etats] et rend la
+ * main tout de suite. Sam, 10/10/2026 : « soit il faut que j'aie un moyen de
+ * choisir une autre version dans Torrentio, soit il faut proposer que des
+ * sources où il y a une vraie piste espagnole ».
  *
  * ## Pourquoi il ne revendique aucun domaine
  *
@@ -62,13 +60,8 @@ import kotlin.time.TimeSource
  *
  * @param http la passerelle, null pour l'ancien comportement (le lien tel quel,
  *   sans suivre l'aiguillage) — les tests d'analyse n'en ont pas besoin.
- * @param intervalleMs cadence des réinterrogations pendant un téléchargement
- *   chez le debrid ; raccourcie par les tests.
  */
-class StremioExtractor(
-    private val http: HttpGateway? = null,
-    private val intervalleMs: Long = INTERVALLE_MS,
-) : SourceExtractor {
+class StremioExtractor(private val http: HttpGateway? = null) : SourceExtractor {
 
     override val hoster = HOSTER
 
@@ -78,7 +71,7 @@ class StremioExtractor(
         if (link.url.isBlank()) return null
         val url = when (val issue = http?.let { aiguillage(it, link) } ?: Issue.Inconnue) {
             is Issue.Prete -> issue.url
-            Issue.Morte -> return null
+            Issue.Morte, Issue.EnCours -> return null
             Issue.Inconnue -> link.url
         }
         return PlayableStream(
@@ -96,70 +89,79 @@ class StremioExtractor(
     private sealed interface Issue {
         data class Prete(val url: String) : Issue
         data object Morte : Issue
+        /** Le debrid télécharge encore : pas de fichier pour l'instant. */
+        data object EnCours : Issue
         /** Pas pu interroger l'aiguillage : le lecteur suivra lui-même. */
         data object Inconnue : Issue
     }
 
     /**
-     * Suit l'aiguillage de l'addon, en attendant le debrid s'il le faut.
+     * Suit l'aiguillage de l'addon, **une fois**.
+     *
+     * Il attendait ici le debrid, en réinterrogeant pendant des minutes ; le
+     * lecteur et le panneau restaient suspendus à cette attente. Sam,
+     * 10/10/2026 : « on ne peut pas dire vas-y, lis depuis Stremio, et puis
+     * attendre que Stremio se démerde pour télécharger le torrent ». Un lien
+     * différé rend donc [Issue.EnCours] tout de suite ; c'est la fiche qui
+     * surveille et prévient (voir DetailsViewModel), en relisant [etats].
      *
      * Une réponse sans redirection ni erreur (l'addon a changé de forme) rend
      * [Issue.Inconnue] : on redonne le lien tel quel plutôt que de déclarer
      * mort ce qu'on ne comprend pas.
      */
     private suspend fun aiguillage(http: HttpGateway, link: EmbedLink): Issue {
-        val debut = TimeSource.Monotonic.markNow()
-        var annonce = false
-        while (true) {
-            val reponse = http.fetch(
-                HttpRequest(
-                    url = link.url,
-                    method = HttpMethod.GET,
-                    headers = mapOf("User-Agent" to Ua.BROWSER, "Accept" to "*/*"),
-                    followRedirects = false,
-                ),
-            ) ?: return Issue.Inconnue
-            if (reponse.status == 404) return Issue.Morte
-            val cible = reponse.headers.entries
-                .firstOrNull { it.key.equals("location", ignoreCase = true) }
-                ?.value?.takeIf { it.isNotBlank() }
-                ?: return Issue.Inconnue
-            when {
-                !isStaticVideo(cible) -> {
-                    val hote = cible.substringAfter("://").substringBefore('/')
-                    Chrono.repere("stremio : fichier chez le debrid -> $hote/…/${cible.substringAfterLast('/').take(60)}")
-                    return Issue.Prete(cible)
-                }
-                !cible.endsWith(DOWNLOADING) -> {
-                    Chrono.repere("stremio : le debrid refuse (${cible.substringAfterLast('/')})")
-                    return Issue.Morte
-                }
-                debut.elapsedNow() >= DELAI_RECUPERATION -> {
-                    Chrono.repere("stremio : le debrid n'a pas fini en ${DELAI_RECUPERATION.inWholeMinutes} min, on abandonne")
-                    return Issue.Morte
-                }
+        val reponse = http.fetch(
+            HttpRequest(
+                url = link.url,
+                method = HttpMethod.GET,
+                headers = mapOf("User-Agent" to Ua.BROWSER, "Accept" to "*/*"),
+                followRedirects = false,
+            ),
+        ) ?: return Issue.Inconnue
+        if (reponse.status == 404) {
+            note(link.url, EtatDebrid.MORT)
+            return Issue.Morte
+        }
+        val cible = reponse.headers.entries
+            .firstOrNull { it.key.equals("location", ignoreCase = true) }
+            ?.value?.takeIf { it.isNotBlank() }
+            ?: return Issue.Inconnue
+        return when {
+            !isStaticVideo(cible) -> {
+                val hote = cible.substringAfter("://").substringBefore('/')
+                Chrono.repere("stremio : fichier chez le debrid -> $hote/…/${cible.substringAfterLast('/').take(60)}")
+                note(link.url, EtatDebrid.PRET)
+                Issue.Prete(cible)
             }
-            if (!annonce) {
-                annonce = true
-                Chrono.repere("stremio : Real-Debrid récupère le fichier (${link.variant.orEmpty()})")
+            cible.endsWith(DOWNLOADING) -> {
+                if (etats.value[link.url] != EtatDebrid.EN_COURS) {
+                    Chrono.repere("stremio : Real-Debrid récupère le fichier (${link.variant.orEmpty()})")
+                }
+                note(link.url, EtatDebrid.EN_COURS)
+                Issue.EnCours
             }
-            delay(intervalleMs)
+            else -> {
+                Chrono.repere("stremio : le debrid refuse (${cible.substringAfterLast('/')})")
+                note(link.url, EtatDebrid.MORT)
+                Issue.Morte
+            }
         }
     }
+
+    /** Ce que le debrid a dit en dernier d'un lien, pour qui surveille une récupération. */
+    enum class EtatDebrid { EN_COURS, PRET, MORT }
 
     companion object {
 
         /** Doit rester égal au `hoster` émis par [StremioProvider] : c'est la jointure. */
         const val HOSTER = "stremio"
 
-        /** Cadence d'interrogation pendant que le debrid télécharge. */
-        const val INTERVALLE_MS = 5_000L
+        /** Par URL de lien, le dernier état connu chez le debrid. */
+        val etats = MutableStateFlow<Map<String, EtatDebrid>>(emptyMap())
 
-        /**
-         * Au-delà, on abandonne : un torrent bien partagé arrive chez
-         * Real-Debrid en une ou deux minutes, un torrent mort jamais.
-         */
-        val DELAI_RECUPERATION = 4.minutes
+        private fun note(url: String, etat: EtatDebrid) {
+            etats.update { it + (url to etat) }
+        }
 
         /** La vidéo statique « téléchargement en cours » de Torrentio. */
         private const val DOWNLOADING = "downloading_v3.mp4"

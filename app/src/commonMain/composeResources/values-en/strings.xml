@@ -98,6 +98,11 @@
     <string name="details_episodes_season">Episodes (season %1$d)</string>
     <string name="details_episode_header">%1$s · Season %2$d</string>
     <string name="details_no_player">No %1$s player worked.</string>
+    <string name="details_debrid_fetching">Real-Debrid is fetching this version. Carry on, the line becomes playable as soon as it is ready.</string>
+    <string name="details_debrid_ready">Ready on Real-Debrid: %1$s</string>
+    <string name="details_debrid_refused">Real-Debrid refuses this version.</string>
+    <string name="details_debrid_slow">Real-Debrid did not finish within ten minutes: try again later.</string>
+    <string name="details_only_deferred">Nothing plays right now in %1$s. Versions marked "to fetch" are requested with one press, the page tells you when ready.</string>
     <string name="details_lang_missing">No %1$s source — other languages available.</string>
     <string name="details_no_sources">No source available for this title.</string>
     <string name="details_sources_none_enabled">No catalogue enabled, in Settings → Sources.</string>

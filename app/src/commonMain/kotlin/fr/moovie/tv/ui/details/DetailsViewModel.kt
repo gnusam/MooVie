@@ -2,6 +2,7 @@ package fr.moovie.tv.ui.details
 
 import fr.moovie.tv.data.sources.LastSourceRepository
 import fr.moovie.tv.data.sources.SourceAudioRepository
+import fr.moovie.tv.data.sources.StremioExtractor
 import fr.moovie.tv.core.player.lacksOriginalAudio
 import fr.moovie.tv.core.sources.usecase.sourceIdentity
 import fr.moovie.tv.ui.player.PlayerTrack
@@ -53,6 +54,11 @@ import fr.moovie.tv.data.watch.TitleMeta
 import fr.moovie.tv.data.watch.WatchProgressRepository
 import fr.moovie.tv.data.watch.WatchlistEntry
 import fr.moovie.tv.resources.Res
+import fr.moovie.tv.resources.details_only_deferred
+import fr.moovie.tv.resources.details_debrid_slow
+import fr.moovie.tv.resources.details_debrid_refused
+import fr.moovie.tv.resources.details_debrid_ready
+import fr.moovie.tv.resources.details_debrid_fetching
 import fr.moovie.tv.resources.details_lang_unavailable
 import fr.moovie.tv.resources.details_needs_key
 import fr.moovie.tv.resources.details_no_player
@@ -1453,7 +1459,9 @@ class DetailsViewModel : ViewModel() {
                     trust = trustNow,
                     sansVo = sansVo,
                     providers = active.providers,
-                    differeDejaEssaye = differeEssaye,
+                    // Jamais de récupération lancée d'office : elle se demande
+                    // depuis le panneau, et la fiche prévient quand c'est prêt.
+                    differeDejaEssaye = true,
                 )
                 if (next != null && catalogueDeTeteAttendu(active.providers, next, toursDePatience)) {
                     if (toursDePatience == 0) {
@@ -1527,7 +1535,14 @@ class DetailsViewModel : ViewModel() {
                             _resolveError.value = getString(Res.string.details_no_player, lang)
                             _panelVisible.value = true
                         }
-                        active.links.isNotEmpty() -> _panelVisible.value = true
+                        active.links.isNotEmpty() -> {
+                            // Rien qui joue tout de suite, mais des versions à
+                            // récupérer : le panneau s'ouvre, avec la consigne.
+                            if (active.links.any { it.deferred && it.language == lang }) {
+                                _resolveError.value = getString(Res.string.details_only_deferred, lang)
+                            }
+                            _panelVisible.value = true
+                        }
                         else -> {
                             _quickPlay.value = QuickPlayState.Unavailable(lang)
                             return@launch
@@ -1578,12 +1593,11 @@ class DetailsViewModel : ViewModel() {
                 livre(local)
                 return@launch
             }
-            // Un lien différé peut prendre des minutes : on le dit.
+            // Un lien différé ne se joue pas : il se **demande**, et la fiche
+            // prévient quand le debrid l'a. Voir demanderAuDebrid.
             if (link.deferred) {
-                _quickPlay.value = QuickPlayState.Searching(
-                    "${hosterLabel(link)} · Real-Debrid récupère le fichier",
-                    hoster = hosterLabel(link),
-                )
+                demanderAuDebrid(link, gen)
+                return@launch
             }
             val stream = runCatching { ExtractorRegistry.resolve(link) }.getOrNull()
                 // Une URL bien formée ne veut pas dire un flux servi. Vidzy rend
@@ -1598,20 +1612,89 @@ class DetailsViewModel : ViewModel() {
             // c'est la résolution la plus récente qui les porte.
             if (gen != resolveGen) return@launch
             _resolving.value = null
-            if (link.deferred) _quickPlay.value = QuickPlayState.Idle
             if (stream != null) {
-                // La lecture va démarrer : persiste les métadonnées pour le
-                // rail « Reprendre » (la position suivra depuis le lecteur).
-                registerUnlessCast(pendingMeta)
-                // Renseigné ici aussi, et pas seulement par la lecture
-                // rapide : sans quoi le bouton de téléchargement manquait sur
-                // le chemin le plus courant, et la reprise après flux cassé ne
-                // savait pas quelle source venait d'échouer.
-                playingLink = link
-                lastSource.remember(playbackKey, link)
-                livre(stream)
+                lireChoisi(stream, link)
             } else {
                 _resolveError.value = getString(Res.string.details_resolve_error, hosterLabel(link))
+            }
+        }
+    }
+
+    /** Le flux d'une source choisie à la main part dans le lecteur. */
+    private suspend fun lireChoisi(stream: PlayableStream, link: EmbedLink) {
+        // La lecture va démarrer : persiste les métadonnées pour le
+        // rail « Reprendre » (la position suivra depuis le lecteur).
+        registerUnlessCast(pendingMeta)
+        // Renseigné ici aussi, et pas seulement par la lecture
+        // rapide : sans quoi le bouton de téléchargement manquait sur
+        // le chemin le plus courant, et la reprise après flux cassé ne
+        // savait pas quelle source venait d'échouer.
+        playingLink = link
+        lastSource.remember(playbackKey, link)
+        livre(stream)
+    }
+
+    /**
+     * Demande une version au debrid **sans attendre dessus**.
+     *
+     * Un appui : si le fichier est déjà là, il joue ; sinon la demande est
+     * partie, le panneau reste utilisable, et une surveillance de fond
+     * prévient quand c'est prêt — la ligne devient jouable. Sam, 10/10/2026 :
+     * « avoir un truc qui nous dise chargé depuis Stremio et me prévenir quand
+     * c'est prêt ».
+     */
+    private suspend fun demanderAuDebrid(link: EmbedLink, gen: Int) {
+        val stream = runCatching { ExtractorRegistry.resolve(link) }.getOrNull()
+        if (gen != resolveGen) return
+        _resolving.value = null
+        if (stream != null) {
+            lireChoisi(stream, link)
+            return
+        }
+        when (StremioExtractor.etats.value[link.url]) {
+            StremioExtractor.EtatDebrid.EN_COURS -> {
+                _resolveError.value = getString(Res.string.details_debrid_fetching)
+                surveillerDebrid(link)
+            }
+            else -> _resolveError.value = getString(Res.string.details_debrid_refused)
+        }
+    }
+
+    /** Liens dont une surveillance est en cours : une seule par lien. */
+    private val surveillances = mutableSetOf<String>()
+
+    private fun surveillerDebrid(link: EmbedLink) {
+        if (!surveillances.add(link.url)) return
+        val cle = playbackKey
+        viewModelScope.launch {
+            var attente = 0L
+            try {
+                while (attente < SURVEILLANCE_MAX_MS) {
+                    delay(SURVEILLANCE_PAS_MS)
+                    attente += SURVEILLANCE_PAS_MS
+                    val stream = runCatching { ExtractorRegistry.resolve(link) }.getOrNull()
+                    if (stream != null) {
+                        Chrono.repere("lecture : version prête chez Real-Debrid (${link.variant.orEmpty()})")
+                        // La ligne devient jouable tout de suite, et la liste
+                        // en cache est jetée : au prochain passage, Torrentio
+                        // la marquera lui-même comme en cache.
+                        _sources.update { st ->
+                            val active = st as? SourcesState.Active ?: return@update st
+                            active.copy(links = active.links.map { if (it.url == link.url) it.copy(deferred = false) else it })
+                        }
+                        sourceCache.invalidate(cle)
+                        _resolveError.value = getString(Res.string.details_debrid_ready, link.variant.orEmpty())
+                        return@launch
+                    }
+                    if (StremioExtractor.etats.value[link.url] == StremioExtractor.EtatDebrid.MORT) {
+                        _resolveError.value = getString(Res.string.details_debrid_refused)
+                        return@launch
+                    }
+                }
+                Chrono.repere("lecture : Real-Debrid n'a pas fini en ${SURVEILLANCE_MAX_MS / 60_000} min (${link.variant.orEmpty()})")
+                _resolveError.value = getString(Res.string.details_debrid_slow)
+            } finally {
+                surveillances.remove(link.url)
             }
         }
     }
@@ -1934,6 +2017,10 @@ private const val MAX_TRIES_PER_EPISODE = 6
 
 /** Échecs de lecture consécutifs tolérés sur un titre avant de s'arrêter sur le panneau. */
 private const val MAX_REBONDS = 3
+
+/** Cadence et durée de la surveillance d'une récupération chez le debrid. */
+private const val SURVEILLANCE_PAS_MS = 15_000L
+private const val SURVEILLANCE_MAX_MS = 10 * 60_000L
 
 /**
  * Définition au-delà de laquelle chercher mieux ne vaut plus les requêtes.
