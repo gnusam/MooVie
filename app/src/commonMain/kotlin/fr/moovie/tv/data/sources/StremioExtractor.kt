@@ -125,7 +125,11 @@ class StremioExtractor(
                 ?.value?.takeIf { it.isNotBlank() }
                 ?: return Issue.Inconnue
             when {
-                !isStaticVideo(cible) -> return Issue.Prete(cible)
+                !isStaticVideo(cible) -> {
+                    val hote = cible.substringAfter("://").substringBefore('/')
+                    Chrono.repere("stremio : fichier chez le debrid -> $hote/…/${cible.substringAfterLast('/').take(60)}")
+                    return Issue.Prete(cible)
+                }
                 !cible.endsWith(DOWNLOADING) -> {
                     Chrono.repere("stremio : le debrid refuse (${cible.substringAfterLast('/')})")
                     return Issue.Morte

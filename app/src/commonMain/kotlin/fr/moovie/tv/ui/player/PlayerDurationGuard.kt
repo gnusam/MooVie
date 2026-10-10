@@ -1,6 +1,7 @@
 package fr.moovie.tv.ui.player
 
 import androidx.compose.runtime.Composable
+import fr.moovie.tv.shared.Chrono
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -50,6 +51,9 @@ fun PlayerDurationGuard(
             val durationMs = controller.durationMs()
             if (durationMs > 0) {
                 if (!isDurationAcceptable(durationMs / 1000.0, expectedMinutes)) {
+                    Chrono.repere(
+                        "lecteur : flux trop court (${durationMs / 1000} s pour $expectedMinutes min attendues), rendu à la cascade",
+                    )
                     reportTooShort()
                 }
                 return@LaunchedEffect

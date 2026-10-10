@@ -964,6 +964,10 @@ class DetailsViewModel : ViewModel() {
     private val lastSource = LastSourceRepository()
     private val sourceAudio = SourceAudioRepository()
 
+    /** Rebonds lecteur -> fiche -> lecteur sur le titre courant. Voir retryAfterPlaybackFailure. */
+    private var rebonds = 0
+    private var rebondsCle = ""
+
     /**
      * Verdicts en mémoire, relus en continu.
      *
@@ -1233,7 +1237,25 @@ class DetailsViewModel : ViewModel() {
         rejectedLinks += failed.url
         playingLink = null
         _resolved.value = null
+        // Plafond de rebonds : chaque échec rouvre le lecteur sur le lien
+        // suivant, et Sam en a vu une série sur Castamar (« ça loupe entre la
+        // lecture et l'accueil »). Au-delà de MAX_REBONDS sur le même titre,
+        // on s'arrête sur le panneau au lieu de continuer à clignoter.
+        if (rebondsCle != playbackKey) {
+            rebondsCle = playbackKey
+            rebonds = 0
+        }
+        rebonds++
+        Chrono.repere("lecture : le lecteur a rendu la main (essai $rebonds), lien ${failed.hoster} écarté")
         val active = _sources.value as? SourcesState.Active ?: return false
+        if (rebonds > MAX_REBONDS) {
+            Chrono.repere("lecture : $MAX_REBONDS rebonds, on s'arrête sur le panneau")
+            viewModelScope.launch {
+                _resolveError.value = getString(Res.string.details_no_player, streamLanguage.value.name)
+                _panelVisible.value = true
+            }
+            return false
+        }
         // Même filtre que la cascade — repli de langue compris, sinon on
         // conclurait « plus rien à tenter » devant des liens qu'elle jouerait.
         val lang = streamLanguage.value.name
@@ -1909,6 +1931,9 @@ enum class LinkStatus { UNKNOWN, CHECKING, OK, DEAD }
 
 /** Essais de sources par épisode avant d'abandonner. Voir DetailsViewModel.downloadSeason. */
 private const val MAX_TRIES_PER_EPISODE = 6
+
+/** Échecs de lecture consécutifs tolérés sur un titre avant de s'arrêter sur le panneau. */
+private const val MAX_REBONDS = 3
 
 /**
  * Définition au-delà de laquelle chercher mieux ne vaut plus les requêtes.

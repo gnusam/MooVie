@@ -2088,7 +2088,12 @@ private fun SourcesSlideOver(
     /** Demande la mesure d'un lien ; sans effet si elle est déjà connue. */
     onRequestQuality: (EmbedLink) -> Unit,
 ) {
-    val links = state.links
+    // Un lien que la sonde a déclaré mort ne s'affiche plus. Sam, 10/10/2026,
+    // devant une colonne de « ne répond pas » sur Castamar (les versions que
+    // Real-Debrid refuse) : « si ça répond pas, ça sert à rien de les
+    // proposer, ça pollue l'interface ». Il reste connu de la cascade, qui
+    // l'évite déjà ; ici il n'a plus rien à dire.
+    val links = state.links.filterNot { statuses[it.url] == LinkStatus.DEAD }
     // Le panneau montre **exactement** l'ordre que la cascade suivra : c'est la
     // même fonction qui décide des deux. Auparavant la liste gardait l'ordre des
     // catalogues pendant que la lecture rapide suivait les définitions, si bien
