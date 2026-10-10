@@ -5,13 +5,22 @@ import fr.moovie.tv.core.sources.port.HttpMethod
 import fr.moovie.tv.core.sources.port.HttpRequest
 import fr.moovie.tv.core.sources.port.HttpResponse
 import fr.moovie.tv.core.sources.port.NetworkProfile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.job
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
+import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.resumeWithException
 
 private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
@@ -34,7 +43,22 @@ class OkHttpGateway(private val client: OkHttpClient) : HttpGateway {
         client.newBuilder().followRedirects(false).followSslRedirects(false).build()
     }
 
-    override suspend fun fetch(request: HttpRequest): HttpResponse? = withContext(Dispatchers.IO) {
+    /**
+     * **Annulable**, et c'est tout l'enjeu.
+     *
+     * La version d'avant appelait `execute()` sous `withContext(IO)` : annuler
+     * la coroutine ne rendait la main qu'au retour de l'appel bloquant. Mesuré
+     * sur le téléviseur le 10/10/2026 : les catalogues, plafonnés à 12 s par
+     * `withTimeoutOrNull`, rendaient « délai dépassé » à 21 s — le temps que la
+     * résolution DNS, puis la connexion, finissent d'échouer d'elles-mêmes. Le
+     * délai affiché à l'utilisateur n'était donc pas celui qu'on avait choisi.
+     *
+     * Ici, l'appel est mis en file (`enqueue`) et la coroutine suspendue jusqu'à
+     * la réponse ; l'annuler annule l'appel OkHttp, qui ferme la socket. Le fil
+     * d'OkHttp, lui, peut rester occupé le temps que la résolution expire — ce
+     * n'est plus le problème de l'appelant.
+     */
+    override suspend fun fetch(request: HttpRequest): HttpResponse? {
         val builder = Request.Builder().url(request.url)
         request.headers.forEach { (name, value) -> builder.header(name, value) }
 
@@ -54,36 +78,72 @@ class OkHttpGateway(private val client: OkHttpClient) : HttpGateway {
         }
 
         val http = if (request.followRedirects) client else noRedirect
+        val call = http.newCall(builder.build())
 
-        runCatching {
-            http.newCall(builder.build()).execute().use { resp ->
-                HttpResponse(
-                    status = resp.code,
-                    // `resp.request.url` est l'URL finale après redirections :
-                    // c'est elle, et non celle demandée, qui doit servir de base
-                    // au Referer chez les hébergeurs à alias tournants.
-                    url = resp.request.url.toString(),
-                    headers = resp.headers.toMultimap()
-                        .mapValues { (_, v) -> v.firstOrNull().orEmpty() },
-                    // HEAD n'a pas de corps ; string() rendrait une chaîne vide,
-                    // ce qui est correct mais inutile à matérialiser.
-                    //
-                    // Texte **ou** octets, jamais les deux : `string()` et
-                    // `bytes()` consomment tous deux le flux, et le second appel
-                    // rendrait vide.
-                    body = when {
-                        request.method == HttpMethod.HEAD -> null
-                        request.binary -> null
-                        else -> resp.body?.string()
-                    },
-                    bytes = if (request.binary && request.method != HttpMethod.HEAD) {
-                        resp.body?.let(::litPlafonne)
-                    } else {
-                        null
-                    },
-                )
+        return try {
+            val resp = call.attendre()
+            withContext(Dispatchers.IO) {
+                // La lecture du corps est bloquante : si la coroutine est
+                // annulée pendant qu'elle dure, fermer l'appel la fait échouer
+                // tout de suite au lieu de laisser le fil au `callTimeout`.
+                val crochet = coroutineContext.job.invokeOnCompletion { cause ->
+                    if (cause is CancellationException) call.cancel()
+                }
+                try {
+                    resp.use { materialise(request, it) }
+                } finally {
+                    crochet.dispose()
+                }
             }
-        }.getOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun materialise(request: HttpRequest, resp: Response): HttpResponse = HttpResponse(
+        status = resp.code,
+        // `resp.request.url` est l'URL finale après redirections :
+        // c'est elle, et non celle demandée, qui doit servir de base
+        // au Referer chez les hébergeurs à alias tournants.
+        url = resp.request.url.toString(),
+        headers = resp.headers.toMultimap()
+            .mapValues { (_, v) -> v.firstOrNull().orEmpty() },
+        // HEAD n'a pas de corps ; string() rendrait une chaîne vide,
+        // ce qui est correct mais inutile à matérialiser.
+        //
+        // Texte **ou** octets, jamais les deux : `string()` et
+        // `bytes()` consomment tous deux le flux, et le second appel
+        // rendrait vide.
+        body = when {
+            request.method == HttpMethod.HEAD -> null
+            request.binary -> null
+            else -> resp.body?.string()
+        },
+        bytes = if (request.binary && request.method != HttpMethod.HEAD) {
+            resp.body?.let(::litPlafonne)
+        } else {
+            null
+        },
+    )
+
+    /** `execute()` suspendu : la réponse, ou l'`IOException` d'OkHttp. */
+    private suspend fun Call.attendre(): Response = suspendCancellableCoroutine { suite ->
+        enqueue(
+            object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (!suite.isCancelled) suite.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    // Arrivée après l'annulation : personne ne la lira, on la
+                    // referme pour ne pas garder la connexion.
+                    suite.resume(response) { response.close() }
+                }
+            },
+        )
+        suite.invokeOnCancellation { cancel() }
     }
 
     /**
