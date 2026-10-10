@@ -81,12 +81,26 @@ private const val FINISHED_AT = 0.92
 private const val FINISHED_MARGIN_MS = 10_000
 
 /**
- * Le média est-il terminé ? Voir [FINISHED_AT].
+ * En dessous de cette durée, ce qui a joué n'était pas le média.
+ *
+ * Torrentio répond à un lien refusé par le debrid avec une **vidéo de trente
+ * secondes** (« failed_infringement », « downloading »…). Jouée jusqu'au bout,
+ * elle passait ici pour un épisode terminé : le 10/10/2026, Castamar E1 et E2
+ * et One Piece E1 ont été marqués vus à 12 h 35, 12 h 40 et 12 h 44 sans que
+ * personne ne les ait regardés — et ont disparu de « Reprendre ». Sam : « ça
+ * ne s'est pas mis dans l'historique des utilisateurs ».
+ *
+ * Deux minutes : aucun carton n'y arrive, aucun épisode n'est en dessous.
+ */
+internal const val FINISHED_MIN_DURATION_MS = 2 * 60_000L
+
+/**
+ * Le média est-il terminé ? Voir [FINISHED_AT] et [FINISHED_MIN_DURATION_MS].
  *
  * `internal` pour que le seuil soit vérifiable sans passer par un magasin.
  */
 internal fun isFinished(positionMs: Long, durationMs: Long): Boolean =
-    durationMs > 0 &&
+    durationMs >= FINISHED_MIN_DURATION_MS &&
         (positionMs >= durationMs - FINISHED_MARGIN_MS || positionMs >= durationMs * FINISHED_AT)
 
 /**

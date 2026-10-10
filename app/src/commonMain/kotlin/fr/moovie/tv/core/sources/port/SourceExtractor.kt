@@ -32,4 +32,17 @@ interface SourceExtractor {
      * chaîne de renifleurs sûre.
      */
     suspend fun extract(link: EmbedLink): PlayableStream?
+
+    /**
+     * Quand cet extracteur rend null, **personne d'autre n'essaie**.
+     *
+     * La résolution enchaîne sinon le domaine puis les renifleurs, et c'est
+     * juste pour une page d'hébergeur : l'extracteur nommé peut se tromper de
+     * forme, un renifleur trouvera peut-être le flux. Mais pour un lien dont
+     * l'extracteur **sait** pourquoi il refuse (le debrid a dit non), les
+     * renifleurs ne font que télécharger le refus en boucle. Mesuré le
+     * 10/10/2026 sur One Piece : 68 s de résolution après un carton Torrentio
+     * rendu en 8 s, le reste passé par les renifleurs à lire le même carton.
+     */
+    val authoritative: Boolean get() = false
 }

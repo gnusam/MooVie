@@ -67,6 +67,13 @@ class StremioExtractor(private val http: HttpGateway? = null) : SourceExtractor 
 
     override fun canHandle(url: String) = false
 
+    /**
+     * Un null d'ici est un verdict (carton d'échec, « en cours », 404), pas une
+     * forme inconnue : les renifleurs n'ont rien à y ajouter, sinon des dizaines
+     * de secondes à télécharger le carton. Voir SourceExtractor.authoritative.
+     */
+    override val authoritative = true
+
     override suspend fun extract(link: EmbedLink): PlayableStream? {
         if (link.url.isBlank()) return null
         val url = when (val issue = http?.let { aiguillage(it, link) } ?: Issue.Inconnue) {

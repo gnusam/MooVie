@@ -159,12 +159,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
-/**
- * Fraction de l'épisode au-delà de laquelle on précharge les sources du
- * suivant. Même seuil que sur Android : les deux lecteurs doivent se
- * comporter pareil.
- */
-private const val PREFETCH_AT = 0.80
 
 
 /**
@@ -243,7 +237,7 @@ internal fun DesktopPlayerScreen(
      */
     chainingNext: Boolean = false,
     onNextEpisode: (season: Int, episode: Int) -> Unit,
-    /** Appelé une fois quand l'épisode approche de sa fin (voir PREFETCH_AT). */
+    /** Appelé une fois, dès que la lecture tourne : l'épisode suivant se prépare pendant celui-ci. */
     onPrefetchNext: () -> Unit = {},
     /** Le flux a cassé en lecture : rend la main à la cascade de sources. */
     onPlaybackFailed: () -> Unit = onBack,
@@ -556,10 +550,10 @@ internal fun DesktopPlayerScreen(
             if (ticks % 10 == 0 && mediaKey.isNotBlank() && isPlaying) {
                 progress.save(mediaKey, timeMs, lengthMs)
 
-                // Même déclencheur que sur Android : les catalogues répondent en
-                // plusieurs secondes, autant les payer pendant que l'épisode
-                // joue encore plutôt qu'après le générique.
-                if (!prefetchAsked && lengthMs > 0 && timeMs >= lengthMs * PREFETCH_AT) {
+                // Même déclencheur que sur Android : dès que la lecture tourne,
+                // parce qu'avec un debrid préparer le suivant veut dire aller
+                // chercher un fichier, et que ça prend des minutes.
+                if (!prefetchAsked) {
                     prefetchAsked = true
                     onPrefetchNext()
                 }

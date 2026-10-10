@@ -70,6 +70,8 @@ class StreamResolution(
     suspend fun resolve(link: EmbedLink): PlayableStream? {
         val named = extractorNamed(link.hoster)
         attempt(named, link)?.let { return it }
+        // Un refus qui fait autorité ferme la chaîne : voir SourceExtractor.authoritative.
+        if (named != null && named.authoritative) return null
 
         val matched = extractorFor(link.url)
         if (matched !== named) attempt(matched, link)?.let { return it }
@@ -89,6 +91,11 @@ class StreamResolution(
     private suspend fun attempt(extractor: SourceExtractor?, link: EmbedLink): PlayableStream? =
         try {
             extractor?.extract(link)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // L'annulation n'est pas un échec de l'extracteur : un délai posé
+            // par l'appelant doit arrêter la chaîne, pas la faire passer au
+            // renifleur suivant.
+            throw e
         } catch (_: Throwable) {
             null
         }

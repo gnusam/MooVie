@@ -388,6 +388,25 @@ class DetailsViewModel : ViewModel() {
     }
 
     /**
+     * Résout un lien, **en temps borné**.
+     *
+     * La passerelle plafonne chaque requête, pas la résolution : un extracteur
+     * qui enchaîne deux ou trois requêtes lentes tenait la lecture rapide
+     * suspendue plus d'une minute (One Piece E2, 10/10/2026 : 68 s puis 15 s
+     * avant que le lecteur ne s'ouvre, « ça cherche éternellement »). Au-delà
+     * de [RESOLUTION_MAX_MS], le lien est tenu pour mort et la cascade passe au
+     * suivant. L'annulation remonte jusqu'à la passerelle, qui coupe l'appel.
+     */
+    private suspend fun resoudre(link: EmbedLink): PlayableStream? {
+        var horsDelai = true
+        val stream = withTimeoutOrNull(RESOLUTION_MAX_MS) {
+            ExtractorRegistry.resolve(link).also { horsDelai = false }
+        }
+        if (horsDelai) Chrono.repere("lecture : résolution ${link.hoster} hors délai (${RESOLUTION_MAX_MS / 1000} s)")
+        return stream
+    }
+
+    /**
      * Liens écartés pour le contenu en cours : sonde négative, ou lecture qui a
      * cassé une fois le lecteur ouvert. La cascade les saute au lieu de
      * reproposer un hébergeur dont on sait déjà qu'il ne passe pas.
@@ -1155,35 +1174,90 @@ class DetailsViewModel : ViewModel() {
 
         viewModelScope.launch {
             val providers = activeProviders()
-            // Déjà en cache et complet : rien à faire, et surtout pas de trafic
-            // vers les hébergeurs pour un résultat qu'on a déjà.
-            if (sourceCache.get(key, providers.map { it.name }.toSet()) != null) return@launch
-
-            val media = MediaRef.Episode(
-                tmdbId,
-                catalogTitle(tv.details.name),
-                tv.details.year,
-                season,
-                episode,
-                originalLanguage = tv.details.originalLanguage,
-            )
+            // Déjà en cache et complet : pas de trafic vers les hébergeurs pour
+            // un résultat qu'on a déjà. Mais le debrid, lui, peut encore avoir
+            // le fichier à aller chercher — voir prechaufferDebrid.
+            val enCache = sourceCache.get(key, providers.map { it.name }.toSet())
             val answered = mutableSetOf<String>()
-            val links = coroutineScope {
-                providers.map { provider ->
-                    async(dispatcherEs) {
-                        val result = runCatching {
-                            withTimeoutOrNull(PROVIDER_TIMEOUT_MS) { provider.sourcesFor(media) }
-                        }.getOrNull()
-                        // Un catalogue en panne n'est pas « interrogé » : sans ça
-                        // son absence serait figée dans le cache pour six heures.
-                        if (result != null) answered += provider.name
-                        keepSupportedHosters(result.orEmpty())
-                            .map { it.copy(provider = provider.name) }
-                    }
-                }.awaitAll().flatten()
-            }.distinctBy { it.url }
+            val links = enCache ?: run {
+                val media = MediaRef.Episode(
+                    tmdbId,
+                    catalogTitle(tv.details.name),
+                    tv.details.year,
+                    season,
+                    episode,
+                    originalLanguage = tv.details.originalLanguage,
+                )
+                coroutineScope {
+                    providers.map { provider ->
+                        async(dispatcherEs) {
+                            val result = runCatching {
+                                withTimeoutOrNull(PROVIDER_TIMEOUT_MS) { provider.sourcesFor(media) }
+                            }.getOrNull()
+                            // Un catalogue en panne n'est pas « interrogé » : sans ça
+                            // son absence serait figée dans le cache pour six heures.
+                            if (result != null) answered += provider.name
+                            keepSupportedHosters(result.orEmpty())
+                                .map { it.copy(provider = provider.name) }
+                        }
+                    }.awaitAll().flatten()
+                }.distinctBy { it.url }.also { if (it.isNotEmpty()) sourceCache.put(key, it, answered) }
+            }
 
-            if (links.isNotEmpty()) sourceCache.put(key, links, answered)
+            prechaufferDebrid(
+                key,
+                links,
+                providers.map {
+                    val repondu = enCache != null || it.name in answered
+                    ProviderProgress(it.name, if (repondu) ProviderStatus.DONE else ProviderStatus.FAILED)
+                },
+            )
+        }
+    }
+
+    /**
+     * Demande au debrid, **dès maintenant**, le fichier que la lecture rapide
+     * choisira pour cet épisode.
+     *
+     * Précharger la liste des sources ne suffit plus depuis qu'un catalogue
+     * rend des versions « à récupérer » : la liste est là en trois secondes,
+     * le fichier met des minutes à arriver chez le debrid. Sam, 10/10/2026 :
+     * « il faut très vite mettre en place un système de préfetch sur Stremio
+     * pour le prochain épisode. Dès qu'on commence un épisode, on préfetch
+     * l'épisode suivant. »
+     *
+     * Même règle de choix que la lecture rapide ([lienSuivant], mémoire des
+     * sources sans VO comprise), différé autorisé : c'est le cas qui justifie
+     * l'avance. Seul le debrid vaut la peine — un lien d'hébergeur expire avant
+     * qu'on en ait besoin. Quand le fichier arrive, la ligne cesse d'être « à
+     * récupérer » dans le cache ([marquerPrete]) : à l'ouverture de l'épisode,
+     * la lecture rapide la prend sans rien demander.
+     */
+    private suspend fun prechaufferDebrid(cle: String, links: List<EmbedLink>, providers: List<ProviderProgress>) {
+        val lang = settings.streamLanguage.first().name
+        val choix = lienSuivant(
+            links,
+            preferred = lang,
+            excluded = emptySet(),
+            heights = _heights.value,
+            trust = trustNow,
+            sansVo = sourceAudio.sansVo.first(),
+            providers = providers,
+            differeDejaEssaye = false,
+        ) ?: return
+        if (choix.hoster != StremioExtractor.HOSTER) return
+        val episode = cle.substringAfterLast(':')
+        if (!choix.deferred) {
+            Chrono.repere("préchargement : $episode déjà chez le debrid (${choix.variant.orEmpty()})")
+            return
+        }
+        Chrono.repere("préchargement : $episode demandé au debrid (${choix.variant.orEmpty()})")
+        if (resoudre(choix) != null) {
+            marquerPrete(cle, choix)
+            return
+        }
+        if (StremioExtractor.etats.value[choix.url] == StremioExtractor.EtatDebrid.EN_COURS) {
+            surveillerDebrid(choix, cle, prevenir = false)
         }
     }
 
@@ -1409,7 +1483,7 @@ class DetailsViewModel : ViewModel() {
                 Chrono.repere("lecture : source mémorisée (${souvenir.hoster}), réessai direct")
                 _quickPlay.value = QuickPlayState.Searching(hosterLabel(souvenir), hoster = hosterLabel(souvenir))
                 val chronoResolution = Chrono.debut("lecture : résolution ${souvenir.hoster}")
-                val stream = runCatching { ExtractorRegistry.resolve(souvenir) }.getOrNull()
+                val stream = resoudre(souvenir)
                 chronoResolution.fin()
                 if (gen != resolveGen) return@launch
                 // **Sans sonde** : elle coûtait 1,4 s (HEAD refusé puis GET, à
@@ -1430,6 +1504,7 @@ class DetailsViewModel : ViewModel() {
                 lastSource.forget(playbackKey)
             }
             val lang = settings.streamLanguage.first().name
+            val debrid = settings.debridService.first().nom
             _quickPlay.value = QuickPlayState.Searching(if (label.isBlank()) lang else "$label · $lang")
             _resolveError.value = null
             // Repart des liens déjà écartés : une reprise après échec de lecture
@@ -1444,6 +1519,8 @@ class DetailsViewModel : ViewModel() {
             var toursDePatience = 0
             // Un seul lien différé par lecture : voir lienSuivant.
             var differeEssaye = false
+            // Refus d'affilée par hébergeur : voir REFUS_MAX_PAR_HEBERGEUR.
+            val refusDeSuite = mutableMapOf<String, Int>()
             val sansVo = sourceAudio.sansVo.first()
             while (true) {
                 val active = _sources.value as? SourcesState.Active
@@ -1480,11 +1557,11 @@ class DetailsViewModel : ViewModel() {
                     // visible au lieu de laisser l'utilisateur devant un écran
                     // d'attente muet. Et dit quand c'est le debrid qu'on attend.
                     _quickPlay.value = QuickPlayState.Searching(
-                        if (next.deferred) "${hosterLabel(next)} · Real-Debrid récupère le fichier" else hosterLabel(next),
+                        if (next.deferred) "${hosterLabel(next)} · $debrid récupère le fichier" else hosterLabel(next),
                         hoster = hosterLabel(next),
                     )
                     val chronoResolution = Chrono.debut("lecture : résolution ${next.hoster}")
-                    val stream = runCatching { ExtractorRegistry.resolve(next) }.getOrNull()
+                    val stream = resoudre(next)
                     chronoResolution.fin()
                     if (gen != resolveGen) return@launch // titre changé entre-temps
                     // Une URL extraite ne suffit pas : ces hébergeurs signent des
@@ -1511,6 +1588,19 @@ class DetailsViewModel : ViewModel() {
                     // écarté ici, l'hébergeur qui l'est là. Un échec ne condamne
                     // rien — voir SEUIL_ECHECS.
                     hosterTrust.recordFailure(next.hoster)
+                    // Trois refus d'affilée du même hébergeur : ses autres
+                    // versions restent au panneau, la cascade passe aux autres
+                    // catalogues. Sans ce plafond, un debrid en panne faisait
+                    // essayer ses soixante versions l'une après l'autre.
+                    val refus = (refusDeSuite[next.hoster] ?: 0) + 1
+                    refusDeSuite[next.hoster] = refus
+                    if (refus >= REFUS_MAX_PAR_HEBERGEUR) {
+                        val restants = active.links.filter { it.hoster == next.hoster && it.url !in tried }
+                        if (restants.isNotEmpty()) {
+                            Chrono.repere("lecture : ${next.hoster} a refusé $refus versions de suite, ${restants.size} autres laissées au panneau")
+                            tried += restants.map { it.url }
+                        }
+                    }
                     continue
                 }
                 if (!active.anyLoading) {
@@ -1599,7 +1689,7 @@ class DetailsViewModel : ViewModel() {
                 demanderAuDebrid(link, gen)
                 return@launch
             }
-            val stream = runCatching { ExtractorRegistry.resolve(link) }.getOrNull()
+            val stream = resoudre(link)
                 // Une URL bien formée ne veut pas dire un flux servi. Vidzy rend
                 // par exemple une playlist signée que son CDN refuse ensuite en
                 // 403 : le lecteur s'ouvrait, échouait, et renvoyait aussitôt sur
@@ -1644,59 +1734,80 @@ class DetailsViewModel : ViewModel() {
      * c'est prêt ».
      */
     private suspend fun demanderAuDebrid(link: EmbedLink, gen: Int) {
-        val stream = runCatching { ExtractorRegistry.resolve(link) }.getOrNull()
+        val stream = resoudre(link)
         if (gen != resolveGen) return
         _resolving.value = null
         if (stream != null) {
             lireChoisi(stream, link)
             return
         }
+        val debrid = settings.debridService.first().nom
         when (StremioExtractor.etats.value[link.url]) {
             StremioExtractor.EtatDebrid.EN_COURS -> {
-                _resolveError.value = getString(Res.string.details_debrid_fetching)
-                surveillerDebrid(link)
+                _resolveError.value = getString(Res.string.details_debrid_fetching, debrid)
+                surveillerDebrid(link, playbackKey, prevenir = true)
             }
-            else -> _resolveError.value = getString(Res.string.details_debrid_refused)
+            else -> _resolveError.value = getString(Res.string.details_debrid_refused, debrid)
         }
     }
 
     /** Liens dont une surveillance est en cours : une seule par lien. */
     private val surveillances = mutableSetOf<String>()
 
-    private fun surveillerDebrid(link: EmbedLink) {
+    /**
+     * Revient voir le debrid toutes les quinze secondes, dix minutes au plus.
+     *
+     * Quand le fichier est là, la ligne devient jouable — voir [marquerPrete].
+     * [prevenir] : dire à la fiche ce qui se passe, ce qu'on fait pour une
+     * demande de l'utilisateur et pas pour un préchargement, qui se tait.
+     */
+    private fun surveillerDebrid(link: EmbedLink, cle: String, prevenir: Boolean) {
         if (!surveillances.add(link.url)) return
-        val cle = playbackKey
         viewModelScope.launch {
+            val debrid = settings.debridService.first().nom
             var attente = 0L
             try {
                 while (attente < SURVEILLANCE_MAX_MS) {
                     delay(SURVEILLANCE_PAS_MS)
                     attente += SURVEILLANCE_PAS_MS
-                    val stream = runCatching { ExtractorRegistry.resolve(link) }.getOrNull()
+                    val stream = resoudre(link)
                     if (stream != null) {
-                        Chrono.repere("lecture : version prête chez Real-Debrid (${link.variant.orEmpty()})")
-                        // La ligne devient jouable tout de suite, et la liste
-                        // en cache est jetée : au prochain passage, Torrentio
-                        // la marquera lui-même comme en cache.
-                        _sources.update { st ->
-                            val active = st as? SourcesState.Active ?: return@update st
-                            active.copy(links = active.links.map { if (it.url == link.url) it.copy(deferred = false) else it })
+                        Chrono.repere("lecture : version prête chez $debrid (${link.variant.orEmpty()}, ${cle.substringAfterLast(':')})")
+                        marquerPrete(cle, link)
+                        if (prevenir) {
+                            _resolveError.value = getString(Res.string.details_debrid_ready, debrid, link.variant.orEmpty())
                         }
-                        sourceCache.invalidate(cle)
-                        _resolveError.value = getString(Res.string.details_debrid_ready, link.variant.orEmpty())
                         return@launch
                     }
                     if (StremioExtractor.etats.value[link.url] == StremioExtractor.EtatDebrid.MORT) {
-                        _resolveError.value = getString(Res.string.details_debrid_refused)
+                        if (prevenir) _resolveError.value = getString(Res.string.details_debrid_refused, debrid)
                         return@launch
                     }
                 }
-                Chrono.repere("lecture : Real-Debrid n'a pas fini en ${SURVEILLANCE_MAX_MS / 60_000} min (${link.variant.orEmpty()})")
-                _resolveError.value = getString(Res.string.details_debrid_slow)
+                Chrono.repere("lecture : $debrid n'a pas fini en ${SURVEILLANCE_MAX_MS / 60_000} min (${link.variant.orEmpty()})")
+                if (prevenir) _resolveError.value = getString(Res.string.details_debrid_slow, debrid)
             } finally {
                 surveillances.remove(link.url)
             }
         }
+    }
+
+    /**
+     * Le fichier est chez le debrid : la ligne n'est plus « à récupérer ».
+     *
+     * Dans la liste affichée si c'est encore ce titre, et dans le cache des
+     * sources — mis à jour plutôt que jeté : jeté, l'ouverture suivante
+     * refaisait toute la recherche, soit l'attente qu'on voulait éviter.
+     */
+    private suspend fun marquerPrete(cle: String, link: EmbedLink) {
+        fun List<EmbedLink>.prete() = map { if (it.url == link.url) it.copy(deferred = false) else it }
+        if (cle == playbackKey) {
+            _sources.update { st ->
+                val active = st as? SourcesState.Active ?: return@update st
+                active.copy(links = active.links.prete())
+            }
+        }
+        sourceCache.update(cle) { it.prete() }
     }
 
     /**
@@ -2019,6 +2130,16 @@ private const val MAX_TRIES_PER_EPISODE = 6
 private const val MAX_REBONDS = 3
 
 /** Cadence et durée de la surveillance d'une récupération chez le debrid. */
+/**
+ * Plafond d'une résolution de lien, toutes requêtes comprises. Voir
+ * DetailsViewModel.resoudre. Au-dessus du délai de lecture de la passerelle
+ * (15 s), pour qu'une réponse lente mais réelle passe encore.
+ */
+private const val RESOLUTION_MAX_MS = 20_000L
+
+/** Refus d'affilée d'un même hébergeur au-delà desquels la cascade le laisse. */
+private const val REFUS_MAX_PAR_HEBERGEUR = 3
+
 private const val SURVEILLANCE_PAS_MS = 15_000L
 private const val SURVEILLANCE_MAX_MS = 10 * 60_000L
 

@@ -139,6 +139,25 @@ class SourceCacheRepository {
         store.edit { it.remove(stringPreferencesKey(ENTRY_PREFIX + key)) }
     }
 
+    /**
+     * Réécrit les liens d'une entrée **sans toucher à sa date ni à ses
+     * catalogues**. Rien si l'entrée manque.
+     *
+     * Pour dire qu'une version « à récupérer » est arrivée chez le debrid :
+     * jeter l'entrée à la place refaisait toute la recherche à l'ouverture
+     * suivante, c'est-à-dire exactement l'attente qu'un préchargement voulait
+     * éviter.
+     */
+    suspend fun update(key: String, transform: (List<EmbedLink>) -> List<EmbedLink>) {
+        if (key.isBlank()) return
+        store.edit { prefs ->
+            val k = stringPreferencesKey(ENTRY_PREFIX + key)
+            val entry = prefs[k]?.let { raw -> runCatching { json.decodeFromString<CachedSources>(raw) }.getOrNull() }
+                ?: return@edit
+            prefs[k] = json.encodeToString(entry.copy(links = transform(entry.links)))
+        }
+    }
+
     /** Vide tout le cache des sources. */
     suspend fun clear() {
         store.edit { prefs ->

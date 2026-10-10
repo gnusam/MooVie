@@ -26,6 +26,7 @@ class StreamResolutionTest {
         override val hoster: String,
         private val claims: (String) -> Boolean = { false },
         private val onExtract: suspend (EmbedLink) -> PlayableStream? = { null },
+        override val authoritative: Boolean = false,
     ) : SourceExtractor {
         var calls = 0
             private set
@@ -208,5 +209,21 @@ class StreamResolutionTest {
         assertEquals(flux, rendu)
         assertEquals(1, nomme.calls)
         assertEquals(1, parDomaine.calls)
+    }
+
+    /** Un refus qui fait autorité (le debrid a dit non) ferme la chaîne. */
+    @Test
+    fun `un extracteur nomme qui fait autorite ne laisse sa chance a personne`() = runTest {
+        val nomme = FakeExtractor("stremio", onExtract = { null }, authoritative = true)
+        val parDomaine = FakeExtractor("direct", claims = { true }, onExtract = { stream("https://cdn/carton.mp4") })
+        val renifleur = FakeExtractor("voe", onExtract = { stream("https://cdn/carton.mp4") })
+
+        val rendu = StreamResolution(listOf(nomme, parDomaine), listOf(renifleur))
+            .resolve(EmbedLink(url = "https://addon.test/resolve/x.mkv", hoster = "stremio"))
+
+        assertEquals(null, rendu)
+        assertEquals(1, nomme.calls)
+        assertEquals(0, parDomaine.calls)
+        assertEquals(0, renifleur.calls)
     }
 }

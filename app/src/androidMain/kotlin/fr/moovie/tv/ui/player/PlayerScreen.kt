@@ -104,6 +104,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import fr.moovie.tv.data.intro.IntroMedia
 import fr.moovie.tv.data.settings.ScreensaverDelay
 import fr.moovie.tv.data.settings.SettingsRepository
+import fr.moovie.tv.core.sources.usecase.isDurationAcceptable
 import fr.moovie.tv.data.watch.WatchProgressRepository
 import fr.moovie.tv.data.watch.nextUpEntry
 import fr.moovie.tv.ui.components.MoovieScreensaver
@@ -179,12 +180,6 @@ private val MEDIA_TOGGLE_KEYS = setOf(
  * les commandes Media3 via [ExoPlayerController], le focus D-pad et les
  * minuteurs.
  */
-/**
- * Fraction de l'épisode au-delà de laquelle on précharge les sources du
- * suivant. Assez tard pour que l'épisode soit probablement fini, assez tôt
- * pour que les catalogues aient le temps de répondre.
- */
-private const val PREFETCH_AT = 0.80
 
 /**
  * Fenêtre pendant laquelle une erreur de lecture est imputée au rechargement
@@ -247,7 +242,7 @@ fun PlayerScreen(
      */
     onCastStarted: () -> Unit = {},
     onNextEpisode: (tmdbId: Int, season: Int, episode: Int) -> Unit = { _, _, _ -> },
-    /** Appelé une fois quand l'épisode approche de sa fin (voir PREFETCH_AT). */
+    /** Appelé une fois, dès que la lecture tourne : l'épisode suivant se prépare pendant celui-ci. */
     onPrefetchNext: () -> Unit = {},
     /** Le flux a cassé en lecture : rend la main à la cascade de sources. */
     onPlaybackFailed: () -> Unit = onBack,
@@ -743,6 +738,15 @@ fun PlayerScreen(
      */
     fun markFinished() {
         val duration = controller.durationMs()
+        // Ce qui vient de finir n'était pas l'épisode : le carton de trente
+        // secondes que Torrentio sert à la place d'un fichier refusé, un logo
+        // d'hébergeur. Le marquer vu le ferait disparaître de « Reprendre » —
+        // c'est ce qui est arrivé à Castamar et One Piece le 10/10/2026 — et
+        // mettrait le suivant en file comme si celui-ci avait été regardé.
+        if (expectedMinutes > 0 && duration > 0 && !isDurationAcceptable(duration / 1000.0, expectedMinutes)) {
+            Chrono.repere("lecteur : fin d'un flux trop court (${duration / 1000} s), rien n'est marqué vu")
+            return
+        }
         if (mediaKey.isNotBlank() && duration > 0) {
             // Rien n'est écrit pour une diffusion venue d'un autre compte : le
             // téléviseur n'est qu'un écran, l'historique appartient au téléphone.
@@ -775,11 +779,12 @@ fun PlayerScreen(
                     progress.save(mediaKey, position, duration)
                 }
 
-                // Assez tard pour que l'épisode soit probablement fini, assez
-                // tôt pour que les catalogues aient le temps de répondre — ils
-                // mettent plusieurs secondes, et c'est ce délai qu'on payait
-                // jusqu'ici en écran noir après le générique.
-                if (!prefetchAsked && duration > 0 && position >= duration * PREFETCH_AT) {
+                // Dès que la lecture tourne, et non aux quatre cinquièmes :
+                // avec un debrid, préparer le suivant ne coûte pas une
+                // requête de catalogue mais la **récupération d'un fichier**,
+                // qui prend des minutes. Sam, 10/10/2026 : « dès qu'on
+                // commence un épisode, on préfetch l'épisode suivant ».
+                if (!prefetchAsked) {
                     prefetchAsked = true
                     onPrefetchNext()
                 }

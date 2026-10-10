@@ -76,9 +76,6 @@ private const val CONTROLS_HIDE_MS = 4_000L
 /** Décompte avant l'épisode suivant, en secondes. */
 private const val AUTO_NEXT_SECONDS = 8
 
-/** Fraction du média à partir de laquelle on demande la source suivante. */
-private const val PREFETCH_AT = 0.80
-
 /**
  * Combien de temps le retour visuel du double appui reste affiché.
  *
@@ -249,7 +246,8 @@ internal fun IosPlayerScreen(
             ticks++
             if (ticks % 10 == 0 && mediaKey.isNotBlank() && isPlaying) {
                 progress.save(mediaKey, timeMs, lengthMs)
-                if (!prefetchAsked && lengthMs > 0 && timeMs >= lengthMs * PREFETCH_AT) {
+                // Dès que la lecture tourne, comme sur Android et le bureau.
+                if (!prefetchAsked) {
                     prefetchAsked = true
                 }
             }
