@@ -72,6 +72,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import fr.moovie.tv.ui.adaptive.LocalUiFlavor
+import java.util.UUID
 import fr.moovie.tv.ui.adaptive.isTouchUi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PictureInPictureAlt
@@ -365,7 +366,15 @@ fun PlayerScreen(
     // système : voir [EpisodePlayer]. C'est **lui** qu'on confie à la session,
     // pas l'ExoPlayer nu — sinon le volet n'offre qu'une flèche gauche.
     val sessionPlayer = remember(player) { EpisodePlayer(player) }
-    val mediaSession = remember { MediaSession.Builder(context, sessionPlayer).build() }
+    // Un identifiant propre à cet écran : Media3 refuse deux sessions de même
+    // identifiant dans un processus, et le défaut est la chaîne vide. Mesuré
+    // le 10/10/2026 : deux instances de MainActivity (l'une avec son lecteur
+    // encore composé) et la seconde plantait l'application à l'ouverture d'un
+    // épisode, « Session ID must be unique ». L'ancienne session se libère à
+    // la sortie de son écran, comme avant ; elle ne bloque plus la suivante.
+    val mediaSession = remember {
+        MediaSession.Builder(context, sessionPlayer).setId("moovie-" + UUID.randomUUID()).build()
+    }
     remember { Chrono.repere("lecteur : session média construite") }
 
     // Surface vidéo seule : le contrôleur intégré est remplacé par l'overlay
