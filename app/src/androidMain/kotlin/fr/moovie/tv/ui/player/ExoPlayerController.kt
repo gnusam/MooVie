@@ -10,6 +10,7 @@ import fr.moovie.tv.core.subtitles.model.SubtitleStyle
 import fr.moovie.tv.core.subtitles.model.toOpaqueArgb
 import androidx.media3.common.C
 import androidx.media3.common.Format
+import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.core.player.isAudioDescription
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.MediaItem
@@ -84,6 +85,7 @@ internal class ExoPlayerController(private val player: Player) : MooviePlayerCon
         val groupes = tracks.groups
         if (groupes.satisfies(wish)) return
         val cible = groupes.findSubtitle(wish)
+        Chrono.repere("lecteur : sous-titres, souhait $wish -> cible ${cible?.let { "${it.first.id}:${it.second}" } ?: "aucune"}")
         if (wish !is SubtitleWish.Off && cible == null) return
 
         val nouveaux = player.trackSelectionParameters.buildUpon()
@@ -279,6 +281,7 @@ internal class ExoPlayerController(private val player: Player) : MooviePlayerCon
             val (group, index) = resolve(trackId) ?: return
             wish = group.toWish(index)
         }
+        Chrono.repere("lecteur : sous-titres, choix $trackId -> souhait $wish")
         reaffirme(player.currentTracks)
     }
 

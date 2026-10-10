@@ -1430,7 +1430,8 @@ class DetailsViewModel : ViewModel() {
                     heights = _heights.value,
                     trust = trustNow,
                     sansVo = sansVo,
-                    differeAutorise = !active.anyLoading && !differeEssaye,
+                    providers = active.providers,
+                    differeDejaEssaye = differeEssaye,
                 )
                 if (next != null && catalogueDeTeteAttendu(active.providers, next, toursDePatience)) {
                     if (toursDePatience == 0) {

@@ -38,19 +38,22 @@ fun catalogueDeTeteAttendu(
 }
 
 /**
- * Le prochain lien de la cascade, en trois cercles.
+ * Le prochain lien de la cascade, en quatre cercles.
  *
- *  1. Les liens **immédiats** : ni différés (voir [EmbedLink.deferred]), ni
- *     connus pour ne pas avoir la VO quand c'est la VO qu'on veut
- *     ([sansVo], identités de source apprises en jouant).
- *  2. Faute d'immédiat, et seulement si [differeAutorise] — tous les
- *     catalogues ont répondu et aucun différé n'a encore été tenté — un lien
- *     différé : Real-Debrid va chercher le fichier, ce qui prend des minutes.
- *     Un seul par lecture : chaque essai ajoute un torrent au compte.
- *  3. Rien.
+ *  1. Les liens **immédiats du catalogue de tête** (le premier de l'ordre de
+ *     l'utilisateur, stremio) ; jamais une source connue pour ne pas avoir la
+ *     VO quand c'est la VO qu'on veut ([sansVo], identités apprises en jouant).
+ *  2. Un lien **différé du catalogue de tête** (voir [EmbedLink.deferred]) dès
+ *     que celui-ci a répondu : Real-Debrid va chercher le fichier, ce qui
+ *     prend des minutes, mais c'est la version voulue. Mesuré le 10/10/2026
+ *     sur Castamar : avec les immédiats de tous les catalogues en premier, la
+ *     lecture partait sur vidapi, doublage anglais étiqueté VO, alors que
+ *     stremio avait la version espagnole à récupérer.
+ *  3. Les immédiats des autres catalogues.
+ *  4. Un différé des autres, une fois tous les catalogues répondus.
  *
- * Sam, 10/10/2026, sur Castamar dont le seul fichier en cache n'avait pas de
- * piste espagnole : « l'objectif, c'est d'écouter de la VO ».
+ * Un seul différé par lecture ([differeDejaEssaye]) : chaque essai ajoute un
+ * torrent au compte. Sam : « l'objectif, c'est d'écouter de la VO ».
  */
 fun lienSuivant(
     links: List<EmbedLink>,
@@ -59,13 +62,23 @@ fun lienSuivant(
     heights: Map<String, Int>,
     trust: Map<String, HosterTrust>,
     sansVo: Set<String>,
-    differeAutorise: Boolean,
+    providers: List<ProviderProgress>,
+    differeDejaEssaye: Boolean,
 ): EmbedLink? {
     val voVoulue = preferred.equals("VO", ignoreCase = true)
     val admissibles = links.filterNot { voVoulue && sourceIdentity(it.url) in sansVo }
-    nextLinkFor(admissibles.filterNot { it.deferred }, preferred, excluded, heights, trust)?.let { return it }
-    if (!differeAutorise) return null
-    return nextLinkFor(admissibles.filter { it.deferred }, preferred, excluded, heights, trust)
+    val tete = providers.firstOrNull()
+    val teteRepondu = tete != null && tete.status != ProviderStatus.LOADING
+    val tousRepondus = providers.isNotEmpty() && providers.none { it.status == ProviderStatus.LOADING }
+    val (deTete, autres) = admissibles.partition { tete != null && it.provider == tete.name }
+
+    fun parmi(candidats: List<EmbedLink>) = nextLinkFor(candidats, preferred, excluded, heights, trust)
+
+    parmi(deTete.filterNot { it.deferred })?.let { return it }
+    if (teteRepondu && !differeDejaEssaye) parmi(deTete.filter { it.deferred })?.let { return it }
+    parmi(autres.filterNot { it.deferred })?.let { return it }
+    if (!tousRepondus || differeDejaEssaye) return null
+    return parmi(autres.filter { it.deferred })
 }
 
 /**

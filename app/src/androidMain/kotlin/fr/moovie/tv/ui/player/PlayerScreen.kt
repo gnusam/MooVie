@@ -77,6 +77,10 @@ import fr.moovie.tv.ui.adaptive.isTouchUi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import fr.moovie.tv.ui.components.MoovieIconButton
+import fr.moovie.tv.resources.player_subtitles_translating
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import fr.moovie.tv.resources.Res
 import fr.moovie.tv.resources.player_pause
 import fr.moovie.tv.resources.player_notification_channel
@@ -893,6 +897,7 @@ fun PlayerScreen(
 
             override fun onTracksChanged(newTracks: Tracks) {
                 tracks = controller.tracks()
+                cuesAnnonces = false
                 // Toutes les pistes audio du fichier, décodables ou non : c'est
                 // ce qui dit pourquoi le menu Audio n'en propose qu'une.
                 newTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.forEach { g ->
@@ -919,6 +924,17 @@ fun PlayerScreen(
             override fun onRenderedFirstFrame() {
                 chronoLecteur?.fin()
                 chronoLecteur = null
+            }
+
+            // Les premières répliques reçues après chaque changement de pistes :
+            // c'est ce qui dit si la piste choisie produit quelque chose, ou si
+            // elle est sélectionnée et muette (ASS que le lecteur ne rend pas).
+            private var cuesAnnonces = false
+
+            override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+                if (cuesAnnonces || cueGroup.cues.isEmpty()) return
+                cuesAnnonces = true
+                Chrono.repere("lecteur : premières répliques affichées (${cueGroup.cues.size}), « ${cueGroup.cues.first().text?.take(40)} »")
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -1425,6 +1441,22 @@ fun PlayerScreen(
                 ),
             )
             ReportMarkingBanner(reportStep, positionMs)
+        }
+
+        // Traduction en cours : dit à l'écran, contrôles masqués ou non. Sam,
+        // 10/10/2026 : « quand il y a une traduction qui est en cours et qui
+        // n'est pas encore aboutie, il faudrait le notifier ».
+        subsState.translated?.let { (faites, total) ->
+            Text(
+                stringResource(Res.string.player_subtitles_translating, faites, total),
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 24.dp, end = 32.dp)
+                    .background(Color(0x99000000), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
         }
 
         // Bouton « Passer l'intro / le générique », au-dessus de la barre pour
