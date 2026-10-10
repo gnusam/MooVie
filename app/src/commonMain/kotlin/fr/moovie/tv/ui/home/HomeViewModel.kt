@@ -111,9 +111,11 @@ class HomeViewModel : ViewModel() {
         //
         // `collectLatest` : un épinglage pendant le chargement annule le lot en
         // cours plutôt que de le laisser écraser le suivant.
+        Chrono.repere("accueil : ViewModel construit")
         viewModelScope.launch {
             combine(settings.tmdbApiKey, layoutRepo.layout, ::Pair)
                 .collectLatest { (apiKey, layout) ->
+                    Chrono.repere("accueil : clé TMDB et disposition lues")
                     if (apiKey.isBlank()) {
                         _state.value = HomeState.NeedsApiKey(getString(Res.string.home_needs_key))
                     } else {

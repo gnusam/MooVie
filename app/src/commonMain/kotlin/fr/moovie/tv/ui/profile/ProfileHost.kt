@@ -2,6 +2,7 @@ package fr.moovie.tv.ui.profile
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -17,6 +18,7 @@ import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import fr.moovie.tv.data.profile.ProfileRepository
+import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.shared.fabriqueParDefaut
 import kotlinx.coroutines.flow.first
 
@@ -25,6 +27,15 @@ import kotlinx.coroutines.flow.first
  * réglages — rien d'autre n'a besoin de savoir comment on change de profil.
  */
 val LocalSwitchProfile = staticCompositionLocalOf<() -> Unit> { {} }
+
+/**
+ * Vrai quand il y a plus d'un profil : « changer de profil » a alors un sens.
+ *
+ * L'accueil s'en sert pour dire qui regarde, et le bouton Retour pour ramener
+ * à la porte avant de quitter l'application. Sam, 10/10/2026 : « c'est vraiment
+ * pas facile de revenir au choix du profil une fois qu'on est connecté ».
+ */
+val LocalCanSwitchProfile = staticCompositionLocalOf { false }
 
 /**
  * Enveloppe de l'app : décide quel profil est servi avant que quoi que ce soit
@@ -55,9 +66,15 @@ fun ProfileHost(content: @Composable (profileId: String) -> Unit) {
     // null = la porte est ouverte, personne n'a encore choisi.
     var session by remember { mutableStateOf<String?>(null) }
 
+    // Suivi en continu, pas lu une fois : un profil créé depuis la porte doit
+    // faire apparaître le bouton de changement sans relancer l'application.
+    val tousLesProfils by repo.profiles.collectAsState(initial = emptyList())
+
     LaunchedEffect(Unit) {
         val active = repo.restoreActive()
+        Chrono.repere("profils : actif restauré")
         val profils = repo.profiles.first()
+        Chrono.repere("profils : liste lue (${profils.size})")
         // Le dernier profil utilisé entre directement : la porte ne s'ouvre
         // que s'il a disparu. Changer reste possible depuis les réglages
         // (LocalSwitchProfile). Sam, 09/10/2026 : « par défaut, bah, c'est
@@ -98,6 +115,7 @@ fun ProfileHost(content: @Composable (profileId: String) -> Unit) {
             CompositionLocalProvider(
                 LocalViewModelStoreOwner provides owner,
                 LocalSwitchProfile provides { session = null },
+                LocalCanSwitchProfile provides (tousLesProfils.size > 1),
             ) {
                 content(current)
             }

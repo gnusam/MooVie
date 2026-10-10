@@ -86,6 +86,8 @@ import fr.moovie.tv.data.remote.remoteTarget
 import fr.moovie.tv.data.sync.SyncCoordinator
 import fr.moovie.tv.data.sync.SyncSettingsRepository
 import fr.moovie.tv.data.sync.SyncTrigger
+import fr.moovie.tv.ui.profile.LocalCanSwitchProfile
+import fr.moovie.tv.ui.profile.LocalSwitchProfile
 import fr.moovie.tv.ui.profile.ProfileHost
 import fr.moovie.tv.ui.details.DetailsScreen
 import fr.moovie.tv.ui.history.HistoryScreen
@@ -452,6 +454,15 @@ class MainActivity : ComponentActivity() {
                         // internes à un écran (panneau des sources, fiche d'épisode)
                         // sont captés avant, par un BackHandler plus profond.
                         BackHandler(enabled = nav.canGoBack) { nav.pop() }
+                        // Retour depuis l'accueil : d'abord la porte des
+                        // profils, l'application ne se quitte qu'au second
+                        // appui — et seulement s'il y a quelqu'un d'autre à
+                        // choisir. Sam, 10/10/2026 : « au lieu de nous sortir
+                        // de l'application, il nous ramène au choix du
+                        // profil avant de nous sortir de l'application ».
+                        val switchProfile = LocalSwitchProfile.current
+                        val canSwitchProfile = LocalCanSwitchProfile.current
+                        BackHandler(enabled = !nav.canGoBack && canSwitchProfile) { switchProfile() }
 
                         // Réseau : c'est lui qui décide de quelle application on
                         // se sert. Voir OfflineScreen.

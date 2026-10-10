@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Download
 import fr.moovie.tv.resources.settings_cat_downloads
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material.icons.filled.Visibility
@@ -51,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,6 +111,11 @@ import fr.moovie.tv.resources.discovery_open
 import fr.moovie.tv.resources.home_search
 import fr.moovie.tv.resources.home_see_more
 import fr.moovie.tv.resources.home_settings
+import fr.moovie.tv.resources.profile_default
+import fr.moovie.tv.data.profile.Profile
+import fr.moovie.tv.data.profile.ProfileRepository
+import fr.moovie.tv.ui.profile.LocalCanSwitchProfile
+import fr.moovie.tv.ui.profile.LocalSwitchProfile
 import fr.moovie.tv.resources.remote_title
 import fr.moovie.tv.resources.media_movie
 import fr.moovie.tv.resources.media_series
@@ -542,6 +549,21 @@ fun HomeScreenContent(
                             icone = Icons.Default.SettingsRemote,
                             libelle = stringResource(Res.string.remote_title),
                             onClick = onOpenRemote,
+                            modifier = navDown,
+                        )
+                    }
+                    // Qui regarde, et le chemin le plus court pour changer : la
+                    // porte des profils était reléguée au fond des réglages.
+                    // N'existe que s'il y a quelqu'un d'autre à choisir. Sam,
+                    // 10/10/2026 : « une petite icône avec le nom de la
+                    // personne qui est connectée ».
+                    if (LocalCanSwitchProfile.current) {
+                        val profilActif by remember { ProfileRepository() }.active
+                            .collectAsState(initial = Profile.Default)
+                        MoovieNavItem(
+                            icone = Icons.Default.Person,
+                            libelle = profilActif.name.ifBlank { stringResource(Res.string.profile_default) },
+                            onClick = LocalSwitchProfile.current,
                             modifier = navDown,
                         )
                     }
