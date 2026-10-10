@@ -245,6 +245,11 @@ fun PlayerScreen(
     onPrefetchNext: () -> Unit = {},
     /** Le flux a cassé en lecture : rend la main à la cascade de sources. */
     onPlaybackFailed: () -> Unit = onBack,
+    /**
+     * Les pistes audio du fichier, une fois connues et la piste choisie. La
+     * fiche s'en sert pour retenir qu'une source n'a pas de VO.
+     */
+    onAudioTracks: (List<PlayerTrack>) -> Unit = {},
 ) {
     val context = LocalContext.current
     // Avec « lecteur : source … » juste après, l'écart sépare la navigation
@@ -690,22 +695,24 @@ fun PlayerScreen(
     // doivent pas défaire un choix fait entre-temps dans le menu.
     var audioRestored by remember(mediaKey) { mutableStateOf(false) }
     LaunchedEffect(tracks.audio, titleKey) {
-        if (audioRestored || tracks.audio.size < 2) return@LaunchedEffect
-        val remembered = titleKey?.let { progress.audioTrack(it) }
-        val retenue = remembered
-            ?.let { matchAudioTrack(it, tracks.audio.map { t -> t.label }) }
-            ?.let { label -> tracks.audio.firstOrNull { it.label == label } }
-        val target = retenue
-            ?: chooseAudioTrack(tracks.audio, preferredAudioLanguages(language, originalLanguage))
-            ?: return@LaunchedEffect
+        if (audioRestored || tracks.audio.isEmpty()) return@LaunchedEffect
         audioRestored = true
-        if (!target.selected) {
-            Chrono.repere(
-                "lecteur : piste audio ${if (retenue != null) "mémorisée" else "choisie par la règle"} -> « ${target.label} »",
-            )
-            controller.selectAudio(target.id)
-            tracks = controller.tracks()
+        if (tracks.audio.size >= 2) {
+            val remembered = titleKey?.let { progress.audioTrack(it) }
+            val retenue = remembered
+                ?.let { matchAudioTrack(it, tracks.audio.map { t -> t.label }) }
+                ?.let { label -> tracks.audio.firstOrNull { it.label == label } }
+            val target = retenue
+                ?: chooseAudioTrack(tracks.audio, preferredAudioLanguages(language, originalLanguage))
+            if (target != null && !target.selected) {
+                Chrono.repere(
+                    "lecteur : piste audio ${if (retenue != null) "mémorisée" else "choisie par la règle"} -> « ${target.label} »",
+                )
+                controller.selectAudio(target.id)
+                tracks = controller.tracks()
+            }
         }
+        onAudioTracks(tracks.audio)
     }
 
     // Scope volontairement détaché de la composition : la comptabilité de fin
@@ -1303,19 +1310,21 @@ fun PlayerScreen(
                     // contrôles, elle n'est pas transmise aux boutons — sinon on
                     // déclencherait une action invisible pour l'utilisateur.
                     //
-                    // Une exception, où l'intention ne fait aucun doute : **OK**.
-                    // Sur une télécommande de TV, OK devant une image sans
-                    // contrôles veut dire « mets en pause » ; obliger à un
-                    // premier appui pour révéler la barre puis à un second pour
-                    // agir fait payer deux gestes ce que l'utilisateur demandait
-                    // au premier. (Les touches média, elles, sont traitées plus
-                    // haut — elles n'ont pas à dépendre de la barre.)
+                    // **OK ne met pas en pause.** Il a fait ça un temps, au
+                    // motif que « OK devant l'image veut dire pause » — faux
+                    // chez qui a une touche Pause sous le pouce. Sam,
+                    // 10/10/2026 : « si je veux mettre sur pause, j'appuie sur
+                    // le bouton pause. Le bouton OK, faut qu'il affiche juste
+                    // les options ». OK révèle donc la barre, comme les autres
+                    // touches ; un second OK, sur le bouton Lecture qui reçoit
+                    // le focus, met en pause. Les touches média, elles, sont
+                    // traitées plus haut et n'ont pas à dépendre de la barre.
                     if (event.key in CONFIRM_KEYS) {
-                        controller.togglePause()
                         // OK va donner le focus au bouton Lecture en réveillant
                         // la barre, et le KeyUp — qui n'est pas consommé —
-                        // l'atteindrait : la pause serait aussitôt annulée. Même
-                        // piège que pour « Passer l'intro » juste au-dessus.
+                        // l'atteindrait : la lecture passerait en pause sur la
+                        // fin de l'appui. Même piège que pour « Passer l'intro »
+                        // juste au-dessus.
                         swallowUntilRelease = true
                     }
                     wake()
