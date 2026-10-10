@@ -22,6 +22,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import fr.moovie.tv.data.download.Download
+import fr.moovie.tv.data.download.DownloadQueue
+import fr.moovie.tv.resources.common_cancel
+import fr.moovie.tv.resources.downloads_remove
+import fr.moovie.tv.resources.details_download_remove
+import fr.moovie.tv.resources.details_download_remove_question
+import androidx.compose.ui.window.Dialog
 import fr.moovie.tv.data.download.readyInSeason
 import fr.moovie.tv.data.download.DownloadState
 import androidx.compose.material.icons.filled.DownloadDone
@@ -1232,7 +1238,11 @@ fun DetailsScreenContent(
                             // d'actions retrouve de l'air, et ces deux-là ne sont
                             // pas des actions sur le titre — l'un ouvre une vidéo,
                             // l'autre change de vue.
-                            DownloadBestButton(downloadSearching, onDownloadBest)
+                            DownloadButton(
+                                download = downloadList.firstOrNull { it.key == movieKey },
+                                searching = downloadSearching,
+                                onDownload = onDownloadBest,
+                            )
                             // Œil = marquer vu / non vu (outline verte quand vu).
                             MoovieIconButton(
                                 onClick = { onToggleWatched(movieKey) },
@@ -1410,6 +1420,7 @@ fun DetailsScreenContent(
                             },
                             onDownloadBest = onDownloadBest,
                             downloadSearching = downloadSearching,
+                            download = downloadList.firstOrNull { it.key == key },
                             showName = s.details.name,
                             season = selected.season,
                             ep = ep,
@@ -2616,6 +2627,67 @@ private fun DownloadBestButton(searching: Boolean, onClick: () -> Unit) {
     )
 }
 
+/**
+ * Le même bouton, qui sait que le titre est déjà sur le disque.
+ *
+ * Un épisode téléchargé se joue **toujours** depuis le disque : c'est sur sa
+ * fiche qu'on découvre que ce fichier n'est pas celui qu'on voulait (Castamar
+ * en « MultiLang » sans piste espagnole, 10/10/2026), et c'est donc là qu'il
+ * faut pouvoir s'en défaire — pas dans un onglet Téléchargements que la fiche
+ * ne montre pas. Sam : « c'est l'endroit où ça te frappe que tu as un
+ * problème. Donc c'est l'endroit où il faut pouvoir le virer ».
+ *
+ * Téléchargé : l'icône « sur le disque », et un appui demande confirmation
+ * avant d'effacer. Sinon : le bouton de téléchargement habituel.
+ */
+@Composable
+private fun DownloadButton(download: Download?, searching: Boolean, onDownload: () -> Unit) {
+    if (download?.state != DownloadState.DONE) {
+        DownloadBestButton(searching, onDownload)
+        return
+    }
+    val scope = rememberCoroutineScope()
+    var confirm by remember(download.key) { mutableStateOf(false) }
+    if (confirm) {
+        val action = remember { FocusRequester() }
+        Dialog(onDismissRequest = { confirm = false }) {
+            Column(
+                modifier = Modifier
+                    .clip(MoovieShape)
+                    .background(Color(0xF5161616))
+                    .padding(28.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(download.title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(Res.string.details_download_remove_question),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MOOVIE_TEXT_DIM,
+                    modifier = Modifier.widthIn(max = 420.dp),
+                )
+                MoovieButton(
+                    onClick = {
+                        confirm = false
+                        scope.launch { DownloadQueue.remove(download.key) }
+                    },
+                    modifier = Modifier.fillMaxWidth().focusRequester(action),
+                ) { Text(stringResource(Res.string.downloads_remove)) }
+                MoovieButton(
+                    onClick = { confirm = false },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(stringResource(Res.string.common_cancel)) }
+            }
+        }
+        LaunchedEffect(Unit) { runCatching { action.requestFocus() } }
+    }
+    MoovieIconButton(
+        onClick = { confirm = true },
+        icon = Icons.Default.DownloadDone,
+        contentDescription = stringResource(Res.string.details_download_remove),
+        selected = true,
+    )
+}
+
 @Composable
 private fun TrailerButton(trailer: TrailerState, onClick: () -> Unit) {
     if (trailer !is TrailerState.Ready) return
@@ -2847,6 +2919,8 @@ private fun EpisodeDetail(
     infoPanel: @Composable () -> Unit = {},
     onDownloadBest: () -> Unit = {},
     downloadSearching: Boolean = false,
+    /** Le téléchargement de cet épisode, s'il existe : le bouton le dit. */
+    download: Download? = null,
     showName: String,
     season: Int,
     ep: Episode,
@@ -2935,7 +3009,7 @@ private fun EpisodeDetail(
                 contentDescription = stringResource(Res.string.details_send_to_tv),
             )
         }
-        DownloadBestButton(downloadSearching, onDownloadBest)
+        DownloadButton(download = download, searching = downloadSearching, onDownload = onDownloadBest)
         // « En savoir plus » : les métadonnées de la série, dont la fiche
         // d'épisode est le seul endroit qui les montre encore. Le bouton avait
         // disparu de cette rangée avec le passage aux onglets, alors que
