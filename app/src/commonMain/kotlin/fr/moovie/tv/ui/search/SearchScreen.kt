@@ -55,6 +55,7 @@ import fr.moovie.tv.ui.theme.MoovieShape
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -133,6 +134,14 @@ import fr.moovie.tv.ui.components.MooviePosterCard
 
 /** Résultats rapportés avant tri, à garder aligné sur `SearchViewModel.DEEP_PAGES`. */
 private const val SEARCH_SCOPE = 60
+
+/**
+ * Colonnes de la grille pendant la saisie à la télécommande. Sur 960 dp, huit
+ * affiches font ~95 dp de large, donc ~175 dp de haut avec leur titre : la
+ * première rangée tient sous le champ, au-dessus du clavier virtuel qui prend
+ * la moitié basse de l'écran. À six colonnes elle dépassait dessous.
+ */
+private const val COLONNES_SOUS_CLAVIER = 8
 
 /**
  * Marge horizontale de l'écran. 40 dp est un recul de salon ; sur les 448 dp
@@ -228,14 +237,37 @@ fun SearchScreenContent(
 
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
 
+    // **À la télécommande, taper et regarder les résultats en même temps.**
+    //
+    // Le clavier virtuel du téléviseur couvre la moitié basse de l'écran. Sur
+    // l'autre moitié, l'écran empilait un titre « Recherche », le champ, puis
+    // les filtres : les résultats commençaient sous le clavier, invisibles
+    // tant qu'on tapait. Sam, 10/10/2026 : « les filtres, on les affiche pour
+    // rien, parce que quand on est en train de taper on ne veut pas filtrer,
+    // on veut taper. Par contre, on ne voit pas les résultats ».
+    //
+    // Tant que le champ a le focus — donc tant que le clavier est ouvert —,
+    // l'écran se réduit au champ et aux résultats : pas de titre, pas de
+    // filtres, marges resserrées, et une grille à huit colonnes pour que la
+    // première rangée d'affiches tienne entière au-dessus du clavier. Les
+    // filtres reviennent quand le focus descend dans les résultats, entre le
+    // champ et la grille, là où la flèche du haut les retrouve. Le titre de
+    // page, lui, ne revient pas à la télécommande : la loupe du champ dit déjà
+    // où l'on est, et il coûtait une rangée d'affiches.
+    val dpad = !LocalUiFlavor.current.isDirect
+    var fieldFocused by remember { mutableStateOf(false) }
+    val typing = dpad && fieldFocused
+
     // Marges horizontales portées par les enfants : la grille de résultats
     // s'étend jusqu'aux bords et ne rogne plus les cartes agrandies au focus.
-    Column(modifier = Modifier.fillMaxSize().padding(vertical = 40.dp)) {
-        MooviePageHeader(
-            titre = stringResource(Res.string.search_title),
-            onBack = onBack.takeIf { showBackButton },
-        )
-        Spacer(Modifier.height(ESPACE_SECTION))
+    Column(modifier = Modifier.fillMaxSize().padding(vertical = if (typing) 16.dp else 40.dp)) {
+        if (!dpad) {
+            MooviePageHeader(
+                titre = stringResource(Res.string.search_title),
+                onBack = onBack.takeIf { showBackButton },
+            )
+            Spacer(Modifier.height(ESPACE_SECTION))
+        }
 
         Row(
             modifier = Modifier.padding(horizontal = searchHPad()),
@@ -247,7 +279,12 @@ fun SearchScreenContent(
                 onValueChange = onQueryChange,
                 // Valider sur le clavier ferme l'IME et saute au 1er résultat.
                 onSubmit = { runCatching { firstResultFocus.requestFocus() } },
-                modifier = Modifier.weight(1f).focusRequester(fieldFocus),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(fieldFocus)
+                    // `hasFocus` et non `isFocused` : le focus est sur le champ
+                    // de texte, enfant de cette rangée.
+                    .onFocusChanged { fieldFocused = it.hasFocus },
             )
             // La télécommande a un micro ; l'app imposait un clavier virtuel,
             // lettre par lettre à la flèche. Le bouton est à droite du champ,
@@ -290,7 +327,7 @@ fun SearchScreenContent(
         // Sous le champ, au-dessus des résultats : c'est l'ordre dans lequel on
         // y pense, et le seul qui laisse la flèche du bas mener du champ aux
         // filtres puis aux résultats.
-        if (query.isNotBlank()) {
+        if (query.isNotBlank() && !typing) {
             Spacer(Modifier.height(12.dp))
             SearchFilterBar(
                 filters = filters,
@@ -299,7 +336,7 @@ fun SearchScreenContent(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(if (typing) 8.dp else 24.dp))
 
         when {
             // Champ vide : l'historique de recherche. Parcourir par genre a
@@ -330,6 +367,11 @@ fun SearchScreenContent(
                 onOpen = onOpen,
                 watchlistKeys = watchlistKeys,
                 onMenu = { menuFor = it },
+                columns = when {
+                    useBottomNav -> 3
+                    typing -> COLONNES_SOUS_CLAVIER
+                    else -> 6
+                },
             )
             else -> Unit
         }
@@ -619,6 +661,11 @@ private fun ResultsGrid(
     watchlistKeys: Set<String> = emptySet(),
     onMenu: (TmdbItem) -> Unit = {},
     filters: SearchFilters = SearchFilters.DEFAULT,
+    // 6 colonnes, c'est calibré sur les 960 dp d'un 1080p. Sur les 448 dp
+    // d'un téléphone en portrait, chaque affiche tombait à 57 dp de large —
+    // et son titre à « Dun… ». Huit sous le clavier du téléviseur : voir
+    // SearchScreenContent.
+    columns: Int = 6,
 ) {
     // Une fois pour toute la grille, et pas par carte : sans réseau, savoir ce
     // qui est disponible est la première chose qu'on cherche des yeux.
@@ -638,10 +685,7 @@ private fun ResultsGrid(
         )
     }
     LazyVerticalGrid(
-        // 6 colonnes, c'est calibré sur les 960 dp d'un 1080p. Sur les 448 dp
-        // d'un téléphone en portrait, chaque affiche tombait à 57 dp de large —
-        // et son titre à « Dun… ».
-        columns = GridCells.Fixed(if (useBottomNav) 3 else 6),
+        columns = GridCells.Fixed(columns),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         // Marges intérieures : la grille clippe à ses bords, les cartes
