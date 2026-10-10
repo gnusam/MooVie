@@ -48,6 +48,7 @@ fun SettingsScreen(
     val introDbKey by viewModel.introDbApiKey.collectAsState()
     val streamLang by viewModel.streamLanguage.collectAsState()
     val providers by viewModel.providers.collectAsState()
+    val debridService by viewModel.debridService.collectAsState()
     val dohEnabled by viewModel.dohEnabled.collectAsState()
     val dohProvider by viewModel.dohProvider.collectAsState()
     val skipIntroOutro by viewModel.skipIntroOutro.collectAsState()
@@ -81,6 +82,9 @@ fun SettingsScreen(
         dohEnabled = dohEnabled,
         dohProvider = dohProvider,
         providers = providers,
+        debridService = debridService,
+        debridsDisponibles = viewModel.debridsDisponibles,
+        onSetDebridService = viewModel::setDebridService,
         onSetApiKey = viewModel::setTmdbApiKey,
         onSetIntroDbKey = viewModel::setIntroDbApiKey,
         onSetStreamLanguage = viewModel::setStreamLanguage,

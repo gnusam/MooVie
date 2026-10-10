@@ -98,10 +98,10 @@
     <string name="details_episodes_season">Episodes (season %1$d)</string>
     <string name="details_episode_header">%1$s · Season %2$d</string>
     <string name="details_no_player">No %1$s player worked.</string>
-    <string name="details_debrid_fetching">Real-Debrid is fetching this version. Carry on, the line becomes playable as soon as it is ready.</string>
-    <string name="details_debrid_ready">Ready on Real-Debrid: %1$s</string>
-    <string name="details_debrid_refused">Real-Debrid refuses this version.</string>
-    <string name="details_debrid_slow">Real-Debrid did not finish within ten minutes: try again later.</string>
+    <string name="details_debrid_fetching">%1$s is fetching this version. Carry on, the line becomes playable as soon as it is ready.</string>
+    <string name="details_debrid_ready">Ready on %1$s: %2$s</string>
+    <string name="details_debrid_refused">%1$s refuses this version.</string>
+    <string name="details_debrid_slow">%1$s did not finish within ten minutes: try again later.</string>
     <string name="details_only_deferred">Nothing plays right now in %1$s. Versions marked "to fetch" are requested with one press, the page tells you when ready.</string>
     <string name="details_lang_missing">No %1$s source — other languages available.</string>
     <string name="details_no_sources">No source available for this title.</string>
@@ -212,6 +212,9 @@
     <string name="settings_doh_resolver">Resolver</string>
     <string name="settings_cat_sources">Sources &amp; hosts</string>
     <string name="settings_sources_help">Order = playback priority (the first is tried first).</string>
+    <string name="settings_debrid">Debrid for Stremio streams</string>
+    <string name="settings_debrid_help">The service that serves Torrentio files. A service without a key in the configuration stays greyed out; switching clears the sources cache.</string>
+    <string name="settings_debrid_no_key">%1$s (no key)</string>
     <string name="settings_move_up">Move %1$s up</string>
     <string name="settings_move_down">Move %1$s down</string>
     <string name="settings_enable">Enable %1$s</string>

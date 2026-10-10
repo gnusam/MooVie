@@ -62,8 +62,12 @@ class StremioProvider(
      * pour un usage où l'attente est acceptable — jamais sur une télévision.
      */
     private val cachedOnly: Boolean = true,
-    /** Manifeste de l'addon. Codé en dur pour ce fork — voir [StremioConfig]. */
-    private val addonUrl: String = StremioConfig.ADDON_URL,
+    /**
+     * Manifeste de l'addon imposé, pour les tests et les sondes. Null en
+     * fonctionnement normal : il se déduit du debrid choisi dans les réglages
+     * et de sa clé dans [StremioConfig].
+     */
+    private val addonUrl: String? = null,
     /**
      * Clé TMDB imposée, au lieu de celle des réglages. Couture pour les sondes,
      * qui tournent sans magasin de réglages ; null en fonctionnement normal.
@@ -89,7 +93,7 @@ class StremioProvider(
     private val json = Json { ignoreUnknownKeys = true }
 
     override suspend fun sourcesFor(media: MediaRef): List<EmbedLink> {
-        val base = addonUrl.trim().trimEnd('/')
+        val base = (addonUrl ?: StremioConfig.addonUrl(settings.debridService.first())).trim().trimEnd('/')
         if (base.isBlank()) return emptyList()
 
         val apiKey = cleTmdb ?: settings.tmdbApiKey.first()

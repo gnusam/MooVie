@@ -100,10 +100,10 @@
     <string name="details_episodes_season">Épisodes (saison %1$d)</string>
     <string name="details_episode_header">%1$s · Saison %2$d</string>
     <string name="details_no_player">Aucun lecteur %1$s n'a fonctionné.</string>
-    <string name="details_debrid_fetching">Real-Debrid récupère cette version. Tu peux continuer, la ligne deviendra jouable dès qu\'elle est prête.</string>
-    <string name="details_debrid_ready">Prête chez Real-Debrid : %1$s</string>
-    <string name="details_debrid_refused">Real-Debrid refuse cette version.</string>
-    <string name="details_debrid_slow">Real-Debrid n\'a pas fini en dix minutes : réessaie plus tard.</string>
+    <string name="details_debrid_fetching">%1$s récupère cette version. Tu peux continuer, la ligne deviendra jouable dès qu\'elle est prête.</string>
+    <string name="details_debrid_ready">Prête chez %1$s : %2$s</string>
+    <string name="details_debrid_refused">%1$s refuse cette version.</string>
+    <string name="details_debrid_slow">%1$s n\'a pas fini en dix minutes : réessaie plus tard.</string>
     <string name="details_only_deferred">Rien ne joue tout de suite en %1$s. Les versions « à récupérer » se demandent d\'un appui, la fiche prévient quand c\'est prêt.</string>
     <string name="details_lang_missing">Aucune source en %1$s — autres langues disponibles.</string>
     <string name="details_no_sources">Aucune source disponible pour ce titre.</string>
@@ -214,6 +214,9 @@
     <string name="settings_doh_resolver">Résolveur</string>
     <string name="settings_cat_sources">Sources &amp; hébergeurs</string>
     <string name="settings_sources_help">Ordre = priorité de lecture (le premier est essayé d'abord).</string>
+    <string name="settings_debrid">Debrid des flux Stremio</string>
+    <string name="settings_debrid_help">Le service qui sert les fichiers de Torrentio. Un service sans clé dans la configuration reste grisé ; en changer vide le cache des sources.</string>
+    <string name="settings_debrid_no_key">%1$s (clé absente)</string>
     <string name="settings_move_up">Monter %1$s</string>
     <string name="settings_move_down">Descendre %1$s</string>
     <string name="settings_enable">Activer %1$s</string>

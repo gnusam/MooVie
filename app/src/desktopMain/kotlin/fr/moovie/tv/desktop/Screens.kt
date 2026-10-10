@@ -202,6 +202,7 @@ internal fun DesktopSettingsScreen(
     val introDbKey by vm.introDbApiKey.collectAsState()
     val streamLang by vm.streamLanguage.collectAsState()
     val providers by vm.providers.collectAsState()
+    val debridService by vm.debridService.collectAsState()
     val dohEnabled by vm.dohEnabled.collectAsState()
     val dohProvider by vm.dohProvider.collectAsState()
     val skipIntroOutro by vm.skipIntroOutro.collectAsState()
@@ -233,6 +234,9 @@ internal fun DesktopSettingsScreen(
         dohEnabled = dohEnabled,
         dohProvider = dohProvider,
         providers = providers,
+        debridService = debridService,
+        debridsDisponibles = vm.debridsDisponibles,
+        onSetDebridService = vm::setDebridService,
         onSetApiKey = vm::setTmdbApiKey,
         onSetIntroDbKey = vm::setIntroDbApiKey,
         onSetStreamLanguage = vm::setStreamLanguage,

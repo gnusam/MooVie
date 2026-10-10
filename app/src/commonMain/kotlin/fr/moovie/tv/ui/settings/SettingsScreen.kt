@@ -149,10 +149,14 @@ import fr.moovie.tv.resources.settings_screensaver_delay
 import fr.moovie.tv.resources.settings_screensaver_help
 import fr.moovie.tv.resources.settings_skip_intro
 import fr.moovie.tv.resources.settings_sources_help
+import fr.moovie.tv.resources.settings_debrid
+import fr.moovie.tv.resources.settings_debrid_help
+import fr.moovie.tv.resources.settings_debrid_no_key
 import fr.moovie.tv.resources.settings_sources_cache
 import fr.moovie.tv.resources.settings_sources_cache_action
 import fr.moovie.tv.resources.settings_sources_cache_done
 import fr.moovie.tv.resources.settings_sources_cache_help
+import fr.moovie.tv.data.sources.DebridService
 import fr.moovie.tv.data.sources.SourceCacheRepository
 import fr.moovie.tv.data.sources.StreamMeasureRepository
 import fr.moovie.tv.resources.settings_stream_lang
@@ -343,6 +347,13 @@ fun SettingsScreenContent(
     dohEnabled: Boolean,
     dohProvider: DohProvider,
     providers: List<ProviderSetting>,
+    /**
+     * Le debrid du catalogue Stremio, et ceux dont la configuration a la clé.
+     * Liste vide = pas de catalogue Stremio, la ligne n'apparaît pas.
+     */
+    debridService: DebridService = DebridService.REALDEBRID,
+    debridsDisponibles: List<DebridService> = emptyList(),
+    onSetDebridService: (DebridService) -> Unit = {},
     onSetApiKey: (String) -> Unit,
     onSetIntroDbKey: (String) -> Unit,
     onSetStreamLanguage: (StreamLanguage) -> Unit,
@@ -684,6 +695,32 @@ fun SettingsScreenContent(
                     style = MaterialTheme.typography.bodySmall,
                     color = MOOVIE_TEXT_DIM,
                 )
+                // Le debrid derrière Stremio, avant l'ordre des catalogues :
+                // c'est lui qui décide de ce que le premier d'entre eux sert.
+                // Un service sans clé reste visible, grisé : on voit qu'il
+                // existe et ce qui lui manque. Voir DebridService.
+                if (debridsDisponibles.isNotEmpty()) {
+                    SettingRow(
+                        label = stringResource(Res.string.settings_debrid),
+                        help = stringResource(Res.string.settings_debrid_help),
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            DebridService.entries.forEach { service ->
+                                val disponible = service in debridsDisponibles
+                                MoovieButton(
+                                    onClick = { onSetDebridService(service) },
+                                    selected = service == debridService,
+                                    enabled = disponible,
+                                ) {
+                                    Text(
+                                        if (disponible) service.nom
+                                        else stringResource(Res.string.settings_debrid_no_key, service.nom),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 providers.forEachIndexed { index, provider ->
                     ProviderRow(
                         index = index,

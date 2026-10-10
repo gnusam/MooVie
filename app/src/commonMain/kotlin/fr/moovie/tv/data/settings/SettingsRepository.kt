@@ -9,6 +9,7 @@ import fr.moovie.tv.core.subtitles.model.SubtitleColor
 import fr.moovie.tv.core.subtitles.model.SubtitleSize
 import fr.moovie.tv.core.subtitles.model.SubtitleStyle
 import fr.moovie.tv.data.net.DohProvider
+import fr.moovie.tv.data.sources.DebridService
 import fr.moovie.tv.data.store.preferencesStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -368,6 +369,19 @@ class SettingsRepository {
     suspend fun setStreamLanguage(value: StreamLanguage) =
         store.edit { it[STREAM_LANGUAGE] = value.name }
 
+    /**
+     * Le debrid derrière le catalogue Stremio. Real-Debrid par défaut : c'est
+     * celui qui a servi à valider toute la chaîne. Voir [DebridService].
+     */
+    val debridService: Flow<DebridService> =
+        store.data.map {
+            runCatching { DebridService.valueOf(it[DEBRID_SERVICE] ?: "REALDEBRID") }
+                .getOrDefault(DebridService.REALDEBRID)
+        }
+
+    suspend fun setDebridService(value: DebridService) =
+        store.edit { it[DEBRID_SERVICE] = value.name }
+
     suspend fun setProviderEnabled(name: String, enabled: Boolean) =
         store.edit { prefs ->
             val current = prefs[DISABLED_PROVIDERS]?.split(',')?.filter { it.isNotBlank() }?.toMutableSet()
@@ -409,6 +423,7 @@ class SettingsRepository {
         val SUBTITLE_SIZE = stringPreferencesKey("subtitle_size")
         val SUBTITLE_COLOR = stringPreferencesKey("subtitle_color")
         val SUBTITLE_BACKDROP = stringPreferencesKey("subtitle_backdrop")
+        val DEBRID_SERVICE = stringPreferencesKey("debrid_service")
     }
 }
 

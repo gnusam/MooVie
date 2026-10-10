@@ -7,7 +7,10 @@ import fr.moovie.tv.data.settings.ScreensaverDelay
 import fr.moovie.tv.data.settings.SettingsRepository
 import fr.moovie.tv.data.settings.StreamLanguage
 import fr.moovie.tv.data.settings.UpdateInterval
+import fr.moovie.tv.data.sources.DebridService
 import fr.moovie.tv.data.sources.ProviderRegistry
+import fr.moovie.tv.data.sources.SourceCacheRepository
+import fr.moovie.tv.data.sources.StremioConfig
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -119,6 +122,23 @@ class SettingsViewModel : ViewModel() {
 
     fun setTmdbApiKey(value: String) = viewModelScope.launch { repo.setTmdbApiKey(value) }
     fun setStreamLanguage(value: StreamLanguage) = viewModelScope.launch { repo.setStreamLanguage(value) }
+
+    /** Le debrid du catalogue Stremio, et ceux dont la configuration a la clé. */
+    val debridService: StateFlow<DebridService> =
+        repo.debridService.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DebridService.REALDEBRID)
+
+    val debridsDisponibles: List<DebridService> = StremioConfig.disponibles()
+
+    /**
+     * Changer de debrid vide le cache des sources : les listes gardées six
+     * heures portent les liens de l'ancien service, et les rejouer ferait
+     * croire que le changement n'a rien fait.
+     */
+    fun setDebridService(value: DebridService) = viewModelScope.launch {
+        if (value == repo.debridService.first()) return@launch
+        repo.setDebridService(value)
+        SourceCacheRepository().clear()
+    }
 
     fun toggleProvider(name: String, enabled: Boolean) =
         viewModelScope.launch { repo.setProviderEnabled(name, enabled) }

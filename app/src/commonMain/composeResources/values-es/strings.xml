@@ -98,10 +98,10 @@
     <string name="details_episodes_season">Episodios (temporada %1$d)</string>
     <string name="details_episode_header">%1$s · Temporada %2$d</string>
     <string name="details_no_player">Ningún reproductor %1$s funcionó.</string>
-    <string name="details_debrid_fetching">Real-Debrid está recuperando esta versión. Puedes seguir, la línea será reproducible en cuanto esté lista.</string>
-    <string name="details_debrid_ready">Lista en Real-Debrid: %1$s</string>
-    <string name="details_debrid_refused">Real-Debrid rechaza esta versión.</string>
-    <string name="details_debrid_slow">Real-Debrid no terminó en diez minutos: inténtalo más tarde.</string>
+    <string name="details_debrid_fetching">%1$s está recuperando esta versión. Puedes seguir, la línea será reproducible en cuanto esté lista.</string>
+    <string name="details_debrid_ready">Lista en %1$s: %2$s</string>
+    <string name="details_debrid_refused">%1$s rechaza esta versión.</string>
+    <string name="details_debrid_slow">%1$s no terminó en diez minutos: inténtalo más tarde.</string>
     <string name="details_only_deferred">Nada se reproduce ahora mismo en %1$s. Las versiones « por recuperar » se piden con una pulsación; la ficha avisa cuando esté lista.</string>
     <string name="details_lang_missing">Sin fuente en %1$s — otros idiomas disponibles.</string>
     <string name="details_no_sources">No hay fuente disponible para este título.</string>
@@ -212,6 +212,9 @@
     <string name="settings_doh_resolver">Resolutor</string>
     <string name="settings_cat_sources">Fuentes y hosts</string>
     <string name="settings_sources_help">Orden = prioridad de reproducción (el primero se prueba antes).</string>
+    <string name="settings_debrid">Debrid de los flujos Stremio</string>
+    <string name="settings_debrid_help">El servicio que sirve los archivos de Torrentio. Un servicio sin clave en la configuración queda en gris; cambiarlo vacía la caché de fuentes.</string>
+    <string name="settings_debrid_no_key">%1$s (sin clave)</string>
     <string name="settings_move_up">Subir %1$s</string>
     <string name="settings_move_down">Bajar %1$s</string>
     <string name="settings_enable">Activar %1$s</string>
