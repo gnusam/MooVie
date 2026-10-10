@@ -55,6 +55,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -762,6 +765,23 @@ fun PlayerScreen(
             nextUpEntry(mediaKey, title, posterUrl.takeIf { it.isNotBlank() }, nextSeason, nextEpisode)
                 ?.let { next -> exitScope.launch { progress.queueNext(next) } }
         }
+    }
+
+    // Touche Home, autre application par-dessus, écran éteint : la lecture
+    // s'arrête au lieu de continuer sans personne devant. Sauf en vignette,
+    // qui est précisément faite pour continuer. Sam, 10/10/2026 : « quand on
+    // fait bouton Home sur la télécommande, il faut mettre en pause la lecture
+    // parce que ça ne sert à rien de laisser tourner le truc en arrière-plan ».
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, enPip) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && !enPip && controller.isPlaying) {
+                Chrono.repere("lecteur : l'application passe en arrière-plan, lecture en pause")
+                controller.pause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Sauvegarde périodique de la position (résolution ~5 s pour la reprise).

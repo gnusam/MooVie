@@ -41,6 +41,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import fr.moovie.tv.data.download.DownloadRepository
 import fr.moovie.tv.data.search.SearchFilters
+import fr.moovie.tv.data.search.SortBy
+import fr.moovie.tv.data.search.MediaFilter
 import fr.moovie.tv.resources.search_filters_scope
 import fr.moovie.tv.data.download.TitleDownloads
 import fr.moovie.tv.data.download.byTitle
@@ -83,6 +85,16 @@ import fr.moovie.tv.resources.search_hint_short
 import fr.moovie.tv.resources.search_loading
 import fr.moovie.tv.resources.search_needs_key
 import fr.moovie.tv.resources.search_no_results
+import fr.moovie.tv.resources.search_hidden_by_filters
+import fr.moovie.tv.resources.search_filters_active
+import fr.moovie.tv.resources.search_filters_reset
+import fr.moovie.tv.resources.search_media_movies
+import fr.moovie.tv.resources.search_media_shows
+import fr.moovie.tv.resources.search_rating_min
+import fr.moovie.tv.resources.search_sort_popularity
+import fr.moovie.tv.resources.search_sort_rating
+import fr.moovie.tv.resources.search_sort_year
+import fr.moovie.tv.resources.search_sort_title
 import fr.moovie.tv.resources.search_recent
 import fr.moovie.tv.resources.search_recent_hint
 import fr.moovie.tv.resources.search_remove_query
@@ -336,6 +348,17 @@ fun SearchScreenContent(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+        // Pendant la saisie, la barre est cachée pour laisser la place aux
+        // résultats ; un filtre resté posé doit quand même se voir, sinon il
+        // trie en silence ce que l'on tape (Sing Street, 10/10/2026).
+        if (query.isNotBlank() && typing && filters.isActive) {
+            Text(
+                stringResource(Res.string.search_filters_active, resumeFiltres(filters)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MOOVIE_TEXT_DIM,
+                modifier = Modifier.padding(horizontal = searchHPad(), vertical = 4.dp),
+            )
+        }
         Spacer(Modifier.height(if (typing) 8.dp else 24.dp))
 
         when {
@@ -359,7 +382,23 @@ fun SearchScreenContent(
                 color = MOOVIE_ERROR,
                 modifier = Modifier.padding(horizontal = searchHPad()),
             )
-            results is SearchState.Empty -> Text(stringResource(Res.string.search_no_results, query), color = MOOVIE_TEXT_MUTED, modifier = Modifier.padding(horizontal = searchHPad()))
+            results is SearchState.Empty -> Column(modifier = Modifier.padding(horizontal = searchHPad())) {
+                if (results.masques > 0) {
+                    // TMDB avait trouvé, les filtres ont tout écarté : le dire,
+                    // et offrir de les lever d'un appui plutôt que de laisser
+                    // chercher l'erreur dans l'orthographe du titre.
+                    Text(
+                        stringResource(Res.string.search_hidden_by_filters, query, results.masques),
+                        color = MOOVIE_TEXT_MUTED,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    MoovieButton(onClick = { onFiltersChange(SearchFilters.DEFAULT) }) {
+                        Text(stringResource(Res.string.search_filters_reset))
+                    }
+                } else {
+                    Text(stringResource(Res.string.search_no_results, query), color = MOOVIE_TEXT_MUTED)
+                }
+            }
             results is SearchState.Results -> ResultsGrid(
                 filters = filters,
                 items = results.items,
@@ -714,3 +753,30 @@ private fun ResultsGrid(
         }
     }
 }
+
+/**
+ * « Séries · Note 7 et plus · 1990–1999 » : ce qui trie pendant la saisie,
+ * quand la barre des filtres est repliée.
+ */
+@Composable
+private fun resumeFiltres(filters: SearchFilters): String = buildList {
+    when (filters.media) {
+        MediaFilter.MOVIE -> add(stringResource(Res.string.search_media_movies))
+        MediaFilter.TV -> add(stringResource(Res.string.search_media_shows))
+        MediaFilter.ALL -> Unit
+    }
+    if (filters.minRating > 0.0) {
+        val note = filters.minRating.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }
+        add(stringResource(Res.string.search_rating_min, note))
+    }
+    if (filters.minYear != null || filters.maxYear != null) {
+        add("${filters.minYear ?: "…"}–${filters.maxYear ?: "…"}")
+    }
+    when (filters.sortBy) {
+        SortBy.RELEVANCE -> Unit
+        SortBy.POPULARITY -> add(stringResource(Res.string.search_sort_popularity))
+        SortBy.RATING -> add(stringResource(Res.string.search_sort_rating))
+        SortBy.YEAR -> add(stringResource(Res.string.search_sort_year))
+        SortBy.TITLE -> add(stringResource(Res.string.search_sort_title))
+    }
+}.joinToString(" · ")
