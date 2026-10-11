@@ -5,6 +5,7 @@ import fr.moovie.tv.data.sources.SourceAudioRepository
 import fr.moovie.tv.data.sources.StremioExtractor
 import fr.moovie.tv.core.player.lacksOriginalAudio
 import fr.moovie.tv.core.sources.usecase.sourceIdentity
+import fr.moovie.tv.core.sources.usecase.cataloguesManquants
 import fr.moovie.tv.ui.player.PlayerTrack
 import fr.moovie.tv.shared.Chrono
 import fr.moovie.tv.shared.dispatcherEs
@@ -1033,9 +1034,13 @@ class DetailsViewModel : ViewModel() {
         // l'obligation d'appuyer deux fois sur OK pour lancer un épisode.
         _sources.value = SourcesState.Active(links = emptyList(), providers = emptyList())
         viewModelScope.launch {
-            // Lus AVANT le cache : une entrée n'est resservie que si elle a
-            // interrogé tous les catalogues actifs aujourd'hui, sinon une mise à
-            // jour qui en ajoute un resterait invisible sur les fiches déjà vues.
+            // Mesuré à part du réseau : sur la TV, ces lectures de magasins
+            // précédaient la première requête de 1,7 s lors d'un enchaînement
+            // d'épisodes (11/10/2026), sans qu'aucune trace ne le dise.
+            val chronoPrelude = Chrono.debut("sources : réglages et cache lus")
+            // Lus AVANT le cache : ce sont eux qui disent quels catalogues une
+            // entrée a manqués et qu'il faut redemander — sinon une mise à jour
+            // qui en ajoute un resterait invisible sur les fiches déjà vues.
             val providers = activeProviders()
             // Tout désactivé dans les réglages : il n'y a rien à interroger. Sans
             // cette sortie, la liste vide passe pour « pas encore publiée » et le
@@ -1055,32 +1060,49 @@ class DetailsViewModel : ViewModel() {
             // Fiche déjà consultée : on ressert les liens connus au lieu de
             // réinterroger les providers (plusieurs secondes). Le flux jouable,
             // lui, sera de toute façon ré-extrait au moment de lire.
-            if (!skipCache) {
-                val cached = sourceCache.get(cacheKey, expected)
-                val cachedProviders = cached?.mapNotNull { it.provider }?.distinct().orEmpty()
-                if (cached != null && cachedProviders.isNotEmpty()) {
-                    if (generation != loadGeneration) return@launch
-                    servedFromCache = true
-                    Chrono.repere("sources : servies depuis le cache (${cached.size} liens)")
-                    _sources.value = SourcesState.Active(
-                        // Filtré aussi ici : une entrée de cache écrite avant
-                        // que la liste existe contient encore ces hébergeurs.
-                        links = keepSupportedHosters(cached),
-                        providers = cachedProviders.map { ProviderProgress(it, ProviderStatus.DONE) },
-                    )
-                    return@launch
-                }
+            //
+            // Une entrée **incomplète** se ressert aussi, pour ce qu'elle sait :
+            // seuls les catalogues qu'elle n'a pas interrogés sont demandés,
+            // puis elle est complétée. C'est ce qui rend le préchargement de
+            // l'épisode suivant utile quand un catalogue a expiré pendant qu'il
+            // tournait — voir cataloguesManquants.
+            val entree = if (skipCache) null else sourceCache.lire(cacheKey)?.let { lue ->
+                // Filtré aussi ici : une entrée écrite avant que la liste des
+                // hébergeurs lus existe en contient encore ; vidée par ce
+                // filtre, elle ne vaut pas mieux qu'une absence.
+                val liens = keepSupportedHosters(lue.links).sortedBy { rank[it.provider] ?: Int.MAX_VALUE }
+                if (liens.isEmpty()) null else SourceCacheRepository.Entree(liens, lue.providers)
             }
+            chronoPrelude.fin(if (entree == null) "rien en cache" else "${entree.links.size} liens en cache")
+            val connus = entree?.links.orEmpty()
+            val manquants = entree?.let { cataloguesManquants(it.providers, expected) } ?: expected
             if (generation != loadGeneration) return@launch
+            if (entree != null) {
+                servedFromCache = true
+                Chrono.repere(
+                    if (manquants.isEmpty()) "sources : servies depuis le cache (${connus.size} liens)"
+                    else "sources : ${connus.size} liens du cache, à redemander : ${manquants.joinToString()}",
+                )
+            }
             _sources.value = SourcesState.Active(
-                links = emptyList(),
-                providers = providers.map { ProviderProgress(it.name, ProviderStatus.LOADING) },
+                links = connus,
+                providers = providers.map { p ->
+                    val status = when {
+                        p.name in manquants -> ProviderStatus.LOADING
+                        connus.any { it.provider == p.name } -> ProviderStatus.DONE
+                        else -> ProviderStatus.EMPTY
+                    }
+                    ProviderProgress(p.name, status)
+                },
             )
+            if (manquants.isEmpty()) return@launch
             // coroutineScope : suspend jusqu'à ce que tous les providers aient
             // répondu, pour ne mettre en cache qu'une liste complète.
-            val chronoTout = Chrono.debut("sources : tous les catalogues")
+            val chronoTout = Chrono.debut(
+                if (entree == null) "sources : tous les catalogues" else "sources : catalogues manquants",
+            )
             coroutineScope {
-                providers.forEach { provider ->
+                providers.filter { it.name in manquants }.forEach { provider ->
                     launch(dispatcherEs) {
                         val chronoCatalogue = Chrono.debut("sources : ${provider.name}")
                         val result = runCatching {
@@ -1174,45 +1196,73 @@ class DetailsViewModel : ViewModel() {
 
         viewModelScope.launch {
             val providers = activeProviders()
-            // Déjà en cache et complet : pas de trafic vers les hébergeurs pour
-            // un résultat qu'on a déjà. Mais le debrid, lui, peut encore avoir
-            // le fichier à aller chercher — voir prechaufferDebrid.
-            val enCache = sourceCache.get(key, providers.map { it.name }.toSet())
-            val answered = mutableSetOf<String>()
-            val links = enCache ?: run {
-                val media = MediaRef.Episode(
-                    tmdbId,
-                    catalogTitle(tv.details.name),
-                    tv.details.year,
-                    season,
-                    episode,
-                    originalLanguage = tv.details.originalLanguage,
-                )
-                coroutineScope {
-                    providers.map { provider ->
-                        async(dispatcherEs) {
-                            val result = runCatching {
-                                withTimeoutOrNull(PROVIDER_TIMEOUT_MS) { provider.sourcesFor(media) }
-                            }.getOrNull()
-                            // Un catalogue en panne n'est pas « interrogé » : sans ça
-                            // son absence serait figée dans le cache pour six heures.
-                            if (result != null) answered += provider.name
-                            keepSupportedHosters(result.orEmpty())
-                                .map { it.copy(provider = provider.name) }
-                        }
-                    }.awaitAll().flatten()
-                }.distinctBy { it.url }.also { if (it.isNotEmpty()) sourceCache.put(key, it, answered) }
-            }
-
+            // Cache d'abord, catalogues manquants ensuite : pas de trafic vers
+            // les hébergeurs pour un résultat qu'on a déjà. Mais le debrid, lui,
+            // peut encore avoir le fichier à aller chercher — voir
+            // prechaufferDebrid.
+            val (links, answered) = liensEpisode(tv, season, episode, providers)
             prechaufferDebrid(
                 key,
                 links,
                 providers.map {
-                    val repondu = enCache != null || it.name in answered
-                    ProviderProgress(it.name, if (repondu) ProviderStatus.DONE else ProviderStatus.FAILED)
+                    ProviderProgress(it.name, if (it.name in answered) ProviderStatus.DONE else ProviderStatus.FAILED)
                 },
             )
         }
+    }
+
+    /**
+     * Les liens d'un épisode, et les catalogues qui ont répondu.
+     *
+     * Cache d'abord ; les catalogues que l'entrée n'a pas interrogés — tous,
+     * sans entrée — sont demandés, et l'entrée est complétée. Un catalogue en
+     * panne n'est pas « répondu » : sans ça son absence serait figée dans le
+     * cache pour six heures. Mais il ne retient plus les autres, voir
+     * `cataloguesManquants`.
+     *
+     * Même chemin que le chargement d'une fiche ([startSourceLoad]), sans la
+     * publication au fil de l'eau : ici on veut la réponse, pas le panneau.
+     * Chaque catalogue rend son verdict avec ses liens, et l'ensemble des
+     * répondus se construit après — un ensemble partagé entre coroutines
+     * parallèles n'est pas un ensemble.
+     */
+    private suspend fun liensEpisode(
+        tv: DetailsState.Tv,
+        season: Int,
+        episode: Int,
+        providers: List<SourceProvider>,
+    ): Pair<List<EmbedLink>, Set<String>> {
+        val key = episodeKey(season, episode)
+        val expected = providers.map { it.name }.toSet()
+        val entree = sourceCache.lire(key)
+        val connus = entree?.let { keepSupportedHosters(it.links) }.orEmpty()
+        val dejaRepondus = entree?.providers.orEmpty().filter { it in expected }.toSet()
+        val manquants = entree?.let { cataloguesManquants(it.providers, expected) } ?: expected
+        if (manquants.isEmpty()) return connus to dejaRepondus
+
+        val media = MediaRef.Episode(
+            tmdbId,
+            catalogTitle(tv.details.name),
+            tv.details.year,
+            season,
+            episode,
+            originalLanguage = tv.details.originalLanguage,
+        )
+        val reponses = coroutineScope {
+            providers.filter { it.name in manquants }.map { provider ->
+                async(dispatcherEs) {
+                    val result = runCatching {
+                        withTimeoutOrNull(PROVIDER_TIMEOUT_MS) { provider.sourcesFor(media) }
+                    }.getOrNull()
+                    val repondu = provider.name.takeIf { result != null }
+                    repondu to keepSupportedHosters(result.orEmpty()).map { it.copy(provider = provider.name) }
+                }
+            }.awaitAll()
+        }
+        val answered = dejaRepondus + reponses.mapNotNull { it.first }
+        val links = (connus + reponses.flatMap { it.second }).distinctBy { it.url }
+        if (links.isNotEmpty()) sourceCache.put(key, links, answered)
+        return links to answered
     }
 
     /**
@@ -1553,6 +1603,12 @@ class DetailsViewModel : ViewModel() {
                 if (next != null) {
                     tried += next.url
                     if (next.deferred) differeEssaye = true
+                    // Horodaté à part de la résolution : entre la réponse d'un
+                    // catalogue et ce choix, la boucle attend son tour sur le
+                    // fil principal — 2,2 s le 11/10/2026 pendant qu'un lecteur
+                    // se fermait et qu'un autre s'ouvrait — et c'est ce délai-là
+                    // qu'on veut pouvoir lire.
+                    Chrono.repere("lecture : lien retenu, ${next.hoster} via ${next.provider}")
                     // Affiche l'hébergeur en cours d'essai : la cascade devient
                     // visible au lieu de laisser l'utilisateur devant un écran
                     // d'attente muet. Et dit quand c'est le debrid qu'on attend.
@@ -1568,8 +1624,18 @@ class DetailsViewModel : ViewModel() {
                     // liens à durée de vie courte et répondent 403 derrière. Sans
                     // cette sonde, la cascade s'arrêtait sur un lien mort et le
                     // lecteur s'ouvrait sur « lecture impossible ».
+                    //
+                    // **Sauf pour le debrid.** Son lien vient d'être délivré par
+                    // Real-Debrid, jamais une page d'erreur, et le sonder coûte
+                    // deux allers-retours — HEAD refusé en 403, puis GET — soit
+                    // 2,4 s mesurées le 11/10/2026 sur l'enchaînement Fullmetal
+                    // Alchemist S1E2 -> E3. Même pari que la source mémorisée :
+                    // s'il est mort malgré tout, le lecteur échoue et
+                    // retryAfterPlaybackFailure rend la main à la cascade, ce
+                    // lien écarté.
+                    val sonde = next.hoster != StremioExtractor.HOSTER
                     if (stream != null && stream.url.isNotBlank() &&
-                        isStreamPlayable(stream, playbackMinutes)
+                        (!sonde || isStreamPlayable(stream, playbackMinutes))
                     ) {
                         if (gen != resolveGen) return@launch
                         registerUnlessCast(pendingMeta)
@@ -2073,43 +2139,15 @@ class DetailsViewModel : ViewModel() {
     }
 
     /**
-     * Les liens d'un épisode : cache d'abord, interrogation des catalogues
-     * sinon. Même chemin que [prefetchEpisodeSources], dont c'est la moitié
-     * utile — sans le garde-fou « une seule fois », puisqu'ici on veut la
-     * réponse et pas seulement la préchauffe.
+     * Les liens d'un épisode : cache d'abord, catalogues manquants sinon. Même
+     * chemin que [prefetchEpisodeSources] — sans le garde-fou « une seule
+     * fois », puisqu'ici on veut la réponse et pas seulement la préchauffe.
      */
     private suspend fun seasonLinks(
         tv: DetailsState.Tv,
         season: Int,
         episode: Int,
-    ): List<EmbedLink> {
-        val providers = activeProviders()
-        val key = episodeKey(season, episode)
-        sourceCache.get(key, providers.map { it.name }.toSet())?.let { return it }
-
-        val media = MediaRef.Episode(
-            tmdbId,
-            catalogTitle(tv.details.name),
-            tv.details.year,
-            season,
-            episode,
-            originalLanguage = tv.details.originalLanguage,
-        )
-        val answered = mutableSetOf<String>()
-        val links = coroutineScope {
-            providers.map { provider ->
-                async(dispatcherEs) {
-                    val result = runCatching {
-                        withTimeoutOrNull(PROVIDER_TIMEOUT_MS) { provider.sourcesFor(media) }
-                    }.getOrNull()
-                    if (result != null) answered += provider.name
-                    result.orEmpty().map { it.copy(provider = provider.name) }
-                }
-            }.awaitAll().flatten()
-        }.let(::keepSupportedHosters).distinctBy { it.url }
-        if (links.isNotEmpty()) sourceCache.put(key, links, answered)
-        return links
-    }
+    ): List<EmbedLink> = liensEpisode(tv, season, episode, activeProviders()).first
 
     fun consumeResolved() { _resolved.value = null }
 }
