@@ -697,7 +697,19 @@ class DetailsViewModel : ViewModel() {
                 }
                 // Fiche film : sources chargées immédiatement en arrière-plan
                 // pour que le bouton « Lire » soit prêt sans ouvrir le panneau.
-                if (it is DetailsState.Movie) loadMovieSources()
+                //
+                // Fiche série : pareil, pour l'épisode que « Lire » reprendra.
+                // Mesuré sur la TV le 11/10/2026 (Fullmetal Alchemist S1E4) :
+                // au clic, 2,2 s à lire réglages et cache, 1,2 s de source
+                // mémorisée, 1,45 s avant que la boucle retienne un lien — le
+                // tout sur un fil principal occupé à composer la fiche. Lancé à
+                // l'ouverture, ce travail est fini quand l'utilisateur appuie,
+                // et quickPlayEpisode ne le refait pas.
+                when (it) {
+                    is DetailsState.Movie -> loadMovieSources()
+                    is DetailsState.Tv -> if (it.resumeEpisode > 0) loadEpisodeSourcesAt(it.season, it.resumeEpisode)
+                    else -> Unit
+                }
                 loadTrailer(repo, apiKey, it)
                 loadRecommendations(repo, apiKey, it)
             }.onFailure { _state.value = DetailsState.Error(getString(Res.string.details_tmdb_error, it.message ?: "")) }
@@ -1465,10 +1477,21 @@ class DetailsViewModel : ViewModel() {
         startQuickPlay(label = "")
     }
 
-    /** Lecture rapide d'un épisode : charge ses sources puis résout la meilleure. */
+    /**
+     * Lecture rapide d'un épisode : résout la meilleure de ses sources, chargées
+     * ici si ce n'est pas déjà fait.
+     *
+     * Déjà fait, c'est le cas courant depuis que la fiche série prépare les
+     * sources de l'épisode à reprendre dès son ouverture (voir le chargement de
+     * la fiche, à côté de celui des sources d'un film). Relancer
+     * le chargement ici aurait tout refait au clic : nouvelle génération,
+     * magasins relus, catalogues réinterrogés — exactement ce qu'on venait
+     * d'anticiper. Même garde que [quickPlayMovie].
+     */
     fun quickPlayEpisode(season: Int, episode: Int) {
         if (quickPlayJob?.isActive == true) return
-        loadEpisodeSourcesAt(season, episode)
+        val dejaChargees = playbackKey == episodeKey(season, episode) && _sources.value !is SourcesState.Idle
+        if (!dejaChargees) loadEpisodeSourcesAt(season, episode)
         startQuickPlay(label = "S${season}E$episode")
     }
 
@@ -1640,11 +1663,17 @@ class DetailsViewModel : ViewModel() {
                         if (gen != resolveGen) return@launch
                         registerUnlessCast(pendingMeta)
                         playingLink = next
+                        _quickPlay.value = QuickPlayState.Idle
+                        livre(stream)
+                        // Après la livraison, pas avant : ces deux écritures de
+                        // magasins ne servent qu'à la prochaine lecture, et sur
+                        // la TV elles se payaient entre le lien résolu et le
+                        // flux livré (0,46 s sur Fullmetal Alchemist S1E4, le
+                        // 11/10/2026). Le lecteur s'ouvre pendant qu'elles
+                        // s'écrivent.
                         // Ce qui vient de jouer ici rejouera probablement.
                         hosterTrust.recordSuccess(next.hoster)
                         lastSource.remember(playbackKey, next)
-                        _quickPlay.value = QuickPlayState.Idle
-                        livre(stream)
                         return@launch
                     }
                     // Écarté durablement : la sonde vient de le refuser, inutile
