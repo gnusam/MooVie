@@ -18,6 +18,7 @@ import fr.moovie.tv.core.subtitles.model.SubtitleQuota
 import fr.moovie.tv.core.subtitles.usecase.SubtitleTiming
 import fr.moovie.tv.core.subtitles.usecase.rankSubtitles
 import fr.moovie.tv.core.subtitles.usecase.timingFor
+import fr.moovie.tv.core.subtitles.usecase.traductionComplete
 import fr.moovie.tv.data.settings.SettingsRepository
 import fr.moovie.tv.core.subtitles.port.SubtitleCatalog
 import fr.moovie.tv.data.subtitles.StremioSubtitleCatalog
@@ -287,7 +288,14 @@ class PlayerSubtitlesViewModel : ViewModel() {
         _state.value = _state.value.copy(tried = _state.value.tried + candidate.fileId)
         choix.markTried(mediaKey, candidate.fileId)
         if (candidate.language == "fr") return
-        val deja = files.existingTranslated(mediaKey, candidate)
+        val deja = files.existingTranslated(mediaKey, candidate)?.takeIf { traduction ->
+            val complete = traductionComplete(
+                parseSrt(original?.let { files.read(it) }.orEmpty()),
+                parseSrt(files.read(traduction).orEmpty()),
+            )
+            if (!complete) Chrono.repere("sous-titres : traduction trouée $traduction, à refaire")
+            complete
+        }
         if (deja != null) {
             original = deja
             _state.value = _state.value.copy(translated = null, translatedDone = true)

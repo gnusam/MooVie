@@ -3,10 +3,12 @@ package fr.moovie.tv.core.subtitles
 import fr.moovie.tv.core.subtitles.port.SubtitleTranslator
 import fr.moovie.tv.core.subtitles.usecase.parseSrt
 import fr.moovie.tv.core.subtitles.usecase.renderSrt
+import fr.moovie.tv.core.subtitles.usecase.traductionComplete
 import fr.moovie.tv.core.subtitles.usecase.translateCues
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -141,5 +143,35 @@ class TranslateCuesTest {
         assertEquals(sequentiel.map { it.text }, parallele.map { it.text })
         assertEquals(sequentiel.map { it.stamps }, parallele.map { it.stamps })
         assertEquals(listOf(1, 2, 3), etapes)
+    }
+    @Test
+    fun `un lot au bon compte mais aux repliques vides est refait, pas accepte`() = runBlocking {
+        // Constate sur Fullmetal Alchemist 13 : quarante cles, trente-neuf
+        // chaines vides, et trois minutes et demie sans sous-titres.
+        val videur = SubtitleTranslator { textes ->
+            if (textes.size > 1) textes.map { "" } else listOf("[fr] ${textes[0]}")
+        }
+        val apres = translateCues(parseSrt(srt), videur, batchSize = 3)
+        assertEquals(parseSrt(srt).map { "[fr] ${it.text}" }, apres.map { it.text })
+    }
+
+    @Test
+    fun `une replique qui revient toujours vide garde son texte`() = runBlocking {
+        val muet = SubtitleTranslator { textes -> textes.map { "" } }
+        val apres = translateCues(parseSrt(srt), muet, batchSize = 3)
+        assertEquals(parseSrt(srt).map { it.text }, apres.map { it.text })
+    }
+
+    @Test
+    fun `une traduction trouee sur disque n'est pas reutilisee`() {
+        val original = parseSrt(srt)
+        val bonne = original.map { it.copy(lines = listOf("[fr] ${it.text}")) }
+        val trouee = bonne.mapIndexed { i, c -> if (i == 1) c.copy(lines = listOf("")) else c }
+        assertTrue(traductionComplete(original, bonne))
+        assertFalse(traductionComplete(original, trouee))
+        assertFalse(traductionComplete(original, bonne.dropLast(1)))
+        // Relue depuis le fichier, la replique vide disparait au parse : c'est
+        // le compte qui la trahit.
+        assertFalse(traductionComplete(original, parseSrt(renderSrt(trouee))))
     }
 }

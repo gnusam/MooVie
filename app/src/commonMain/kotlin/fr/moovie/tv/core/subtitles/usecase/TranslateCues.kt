@@ -92,7 +92,7 @@ private suspend fun translateBatch(
     // La vérification de taille est le contrat, et elle est faite **ici** et non
     // chez l'adaptateur : c'est le domaine qui sait pourquoi elle compte.
     val rendu = runCatching { translator.translate(textes) }.getOrNull()
-    if (rendu != null && rendu.size == textes.size) return rendu
+    if (rendu != null && rendu.size == textes.size && !perdUneReplique(textes, rendu)) return rendu
 
     if (textes.size == 1) return textes
 
@@ -100,6 +100,31 @@ private suspend fun translateBatch(
     return translateBatch(textes.take(milieu), translator) +
         translateBatch(textes.drop(milieu), translator)
 }
+
+/**
+ * Une traduction qui rend **vide** une réplique qui ne l'était pas est un échec,
+ * même au bon compte.
+ *
+ * Constaté le 15/10/2026 sur Fullmetal Alchemist, épisode 13 : un lot de
+ * quarante est revenu avec le bon nombre de clés, mais trente-neuf chaînes
+ * vides. La sortie structurée garantit les clés, pas leur contenu. Le lot
+ * passait le contrôle de taille, et trois minutes et demie de film sont restées
+ * sans le moindre sous-titre. Traité comme un lot raté, il repasse par la
+ * bissection, et une réplique qui revient vide garde son texte d'origine.
+ */
+private fun perdUneReplique(source: List<String>, traduit: List<String>): Boolean =
+    source.indices.any { source[it].isNotBlank() && traduit[it].isBlank() }
+
+/**
+ * Une traduction déjà rangée sur disque est-elle réutilisable telle quelle ?
+ *
+ * Non si elle n'a pas le même nombre de répliques que l'original, ou si une
+ * réplique non vide y est devenue vide : c'est la trace d'un lot raté (voir
+ * [perdUneReplique]), écrit avant que ce contrôle n'existe. Elle se refait
+ * alors, au lieu d'être resservie à chaque reprise.
+ */
+fun traductionComplete(original: List<SrtCue>, traduit: List<SrtCue>): Boolean =
+    original.size == traduit.size && !perdUneReplique(original.map { it.text }, traduit.map { it.text })
 
 /**
  * Quarante répliques, et le choix vient d'une mesure : le débit ne dépend pas de
