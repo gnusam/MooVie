@@ -6,6 +6,9 @@ import fr.moovie.tv.core.subtitles.model.SubtitleCandidate
 import fr.moovie.tv.core.subtitles.model.VideoIdentity
 import fr.moovie.tv.core.subtitles.model.SubtitleQuota
 import fr.moovie.tv.core.subtitles.port.SubtitleCatalog
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.concurrent.Volatile
 
 /**
@@ -51,6 +54,13 @@ class ChainedSubtitleCatalog(
 
     private val proprietaire = mutableMapOf<String, SubtitleCatalog>()
 
+    /**
+     * Protège [actif] et [proprietaire] : une recherche et un téléchargement
+     * peuvent s'exécuter en même temps (le choix d'un sous-titre pendant qu'une
+     * autre liste se charge). Jamais tenu pendant un appel réseau.
+     */
+    private val verrou = Mutex()
+
     override suspend fun search(
         media: MediaRef,
         languages: List<String>,
@@ -60,19 +70,33 @@ class ChainedSubtitleCatalog(
             if (!catalog.available) continue
             // Un catalogue qui lève ne doit pas priver l'utilisateur du suivant :
             // le port promet de ne pas lever, on ne parie pas dessus.
-            val trouves = runCatching { catalog.search(media, languages, video) }.getOrDefault(emptyList())
+            // L'annulation, elle, doit remonter : la cascade s'arrête avec le ViewModel.
+            val trouves = try {
+                catalog.search(media, languages, video)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                emptyList()
+            }
             if (trouves.isEmpty()) continue
-            actif = catalog
-            proprietaire.clear()
-            trouves.forEach { proprietaire[it.fileId] = catalog }
+            verrou.withLock {
+                actif = catalog
+                proprietaire.clear()
+                trouves.forEach { proprietaire[it.fileId] = catalog }
+            }
             return trouves
         }
-        actif = null
+        verrou.withLock { actif = null }
         return emptyList()
     }
 
-    override suspend fun download(candidate: SubtitleCandidate): DownloadedSubtitle? =
-        (proprietaire[candidate.fileId] ?: actif)?.download(candidate)
+    override suspend fun download(candidate: SubtitleCandidate): DownloadedSubtitle? {
+        val source = verrou.withLock { proprietaire[candidate.fileId] ?: actif } ?: return null
+        return source.download(candidate)
+    }
 
-    override suspend fun quota(): SubtitleQuota = actif?.quota() ?: SubtitleQuota.Unknown
+    override suspend fun quota(): SubtitleQuota {
+        val source = verrou.withLock { actif } ?: return SubtitleQuota.Unknown
+        return source.quota()
+    }
 }

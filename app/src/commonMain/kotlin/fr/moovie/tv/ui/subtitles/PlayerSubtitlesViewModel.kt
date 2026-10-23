@@ -247,7 +247,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
             ),
             trouble = if (found.isEmpty()) SubtitleTrouble.NOTHING_FOUND else null,
             quota = catalog.quota(),
-            downloaded = files.storedIds(mediaKey),
+            downloaded = files.storedIds(mediaKey, found),
             tried = choix.tried(mediaKey),
         )
     }
@@ -337,7 +337,7 @@ class PlayerSubtitlesViewModel : ViewModel() {
             active = candidate,
             timing = timing,
             loading = false,
-            downloaded = files.storedIds(mediaKey),
+            downloaded = files.storedIds(mediaKey, _state.value.candidates),
         )
         publish(timing)
         return true
@@ -518,7 +518,10 @@ class PlayerSubtitlesViewModel : ViewModel() {
         original = null
         mediaKey = ""
         streamFps = null
-        _state.value = PlayerSubtitlesState(available = openSubtitlesApiKey.isNotBlank())
+        // Même source que l'init : `load` sort si `available` est faux, donc la
+        // seule clé OpenSubtitles couperait la cascade Stremio après un passage
+        // d'épisode.
+        _state.value = PlayerSubtitlesState(available = catalog.available)
         _file.value = null
     }
 

@@ -13,8 +13,17 @@ import fr.moovie.tv.data.tmdb.TmdbRepository
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.isSuccess
+import io.ktor.utils.io.core.readBytes
+import io.ktor.utils.io.readRemaining
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -54,6 +63,8 @@ class StremioSubtitleCatalog(
     private val tmdb: TmdbRepository = TmdbRepository(),
     /** Clé TMDB imposée. Couture pour les sondes ; null en fonctionnement normal. */
     private val cleTmdb: String? = null,
+    /** Lecture HTTP (statut, octets) ; remplaçable pour se tester sans réseau. */
+    private val lecteur: suspend (String) -> Pair<Int, ByteArray> = ::lireReseau,
 ) : SubtitleCatalog {
 
     override val name: String = "Stremio"
@@ -68,6 +79,9 @@ class StremioSubtitleCatalog(
      * qu'en bloc, pour un titre entier.
      */
     private val liens = mutableMapOf<String, String>()
+
+    /** Protège [liens] : recherche et téléchargement peuvent tourner en même temps. */
+    private val liensVerrou = Mutex()
 
     override suspend fun search(
         media: MediaRef,
@@ -88,52 +102,97 @@ class StremioSubtitleCatalog(
         // Les « extras » du protocole Stremio : l'addon OpenSubtitles range en
         // tête les dépôts faits pour ce fichier exact.
         val extras = video?.let { "/videoHash=${it.hash}&videoSize=${it.sizeBytes}" }.orEmpty()
-        val body = runCatching {
+        val body = try {
             clientRest.get("${addonUrl.trimEnd('/')}/subtitles/$type/$id$extras.json") {
                 header("User-Agent", UA)
             }.body<String>()
-        }.getOrNull() ?: return emptyList()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return emptyList()
+        }
 
+        return decode(body, voulues)
+    }
+
+    /**
+     * Réponse de l'addon vers candidats, filtrés sur les langues voulues.
+     * Séparé de [search] pour se tester sans réseau.
+     */
+    internal suspend fun decode(body: String, voulues: Set<String>): List<SubtitleCandidate> {
         val entrees = runCatching {
             json.parseToJsonElement(body).jsonObject["subtitles"]?.jsonArray
         }.getOrNull() ?: return emptyList()
 
         val vus = mutableSetOf<String>()
-        liens.clear()
-        return entrees.mapNotNull { element ->
-            val o = runCatching { element.jsonObject }.getOrNull() ?: return@mapNotNull null
-            val url = o["url"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                ?: return@mapNotNull null
-            if (!vus.add(url)) return@mapNotNull null
+        // Construits à part, puis publiés d'un bloc : une recherche concurrente
+        // ne voit jamais la table à moitié écrite.
+        val nouveauxLiens = mutableMapOf<String, String>()
+        val candidats = mutableListOf<SubtitleCandidate>()
+        for (element in entrees) {
+            val o = runCatching { element.jsonObject }.getOrNull() ?: continue
+            val url = o["url"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: continue
+            if (!vus.add(url)) continue
 
             val langue = codeCourt(o["lang"]?.jsonPrimitive?.content.orEmpty())
-            if (langue !in voulues) return@mapNotNull null
+            if (langue !in voulues) continue
 
             // L'identifiant de l'addon plutôt que l'URL, et l'URL gardée ici.
             // Le port autorise n'importe quelle forme, mais le magasin de
             // fichiers en fait un nom de fichier : une URL y devenait un chemin
             // impossible. Un identifiant court est aussi ce qui s'affiche à
             // l'écran à côté de la langue.
+            //
+            // Sans `id`, l'identifiant de repli porte un préfixe que ne peut pas
+            // avoir un `id` numérique. Deux URL peuvent partager un hash : la
+            // seconde est alors écartée plutôt que de reprendre le fichier de la
+            // première.
             val idSousTitre = o["id"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-                ?: url.hashCode().toUInt().toString()
-            liens[idSousTitre] = url
+                ?: "url-${url.hashCode().toUInt()}"
+            val deja = nouveauxLiens[idSousTitre]
+            if (deja != null && deja != url) continue
+            nouveauxLiens[idSousTitre] = url
 
-            SubtitleCandidate(
+            candidats += SubtitleCandidate(
                 fileId = idSousTitre,
                 language = langue,
+                release = nomDeRelease(o),
+                fps = fpsDe(o),
             )
         }
+        liensVerrou.withLock {
+            liens.clear()
+            liens.putAll(nouveauxLiens)
+        }
+        return candidats
     }
 
     override suspend fun download(candidate: SubtitleCandidate): DownloadedSubtitle? {
-        val url = liens[candidate.fileId] ?: return null
-        val octets = runCatching {
-            clientRest.get(url) { header("User-Agent", UA) }.body<ByteArray>()
-        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        val url = liensVerrou.withLock { liens[candidate.fileId] } ?: return null
+        // HTTPS seulement : l'URL vient de l'addon, pas de nous. Un lien en clair
+        // ou d'un autre schéma n'est pas suivi.
+        if (!url.startsWith("https://")) return null
+
+        // clientRest ne lève pas sur un statut d'erreur : sans ce contrôle, une page
+        // 404 ou 5xx serait enregistrée comme sous-titre. Une réponse vide ou qui
+        // dépasse la borne n'est pas un sous-titre non plus.
+        val (statut, octets) = try {
+            lecteur(url)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return null
+        }
+        if (statut !in 200..299) return null
+        if (octets.isEmpty() || octets.size > TAILLE_MAX) return null
+
+        // Le décodage ne doit jamais remonter : une exception ici tombait jusqu'au
+        // ViewModel du lecteur et fermait l'application.
+        val texte = runCatching { enUtf8(octets) }.getOrNull() ?: return null
 
         return DownloadedSubtitle(
             candidate = candidate,
-            content = enUtf8(octets),
+            content = texte,
             fileName = url.substringAfterLast('/').substringBefore('?'),
         )
     }
@@ -144,6 +203,9 @@ class StremioSubtitleCatalog(
     internal companion object {
 
         const val UA = "Moo-vie"
+
+        /** Plafond d'un fichier de sous-titres lu depuis l'addon : 2 Mo. */
+        const val TAILLE_MAX = 2L * 1024 * 1024
 
         /**
          * Décodage **en connaissance de cause**, et non `toString(UTF_8)`.
@@ -258,4 +320,19 @@ class StremioSubtitleCatalog(
             }
         }
     }
+}
+
+/**
+ * GET borné : le statut est rendu tel quel (clientRest ne lève pas sur une
+ * erreur) et le corps n'est lu que sur un 2xx, une unité au-delà de la borne
+ * pour la voir sans charger la réponse entière.
+ */
+private suspend fun lireReseau(url: String): Pair<Int, ByteArray> {
+    val reponse = clientRest.get(url) { header("User-Agent", StremioSubtitleCatalog.UA) }
+    val statut = reponse.status
+    if (!statut.isSuccess()) return statut.value to ByteArray(0)
+    val octets = reponse.bodyAsChannel()
+        .readRemaining(StremioSubtitleCatalog.TAILLE_MAX + 1)
+        .readBytes()
+    return statut.value to octets
 }

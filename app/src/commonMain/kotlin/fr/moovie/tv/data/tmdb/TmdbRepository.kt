@@ -3,6 +3,8 @@ package fr.moovie.tv.data.tmdb
 import fr.moovie.tv.data.search.SearchFilters
 import fr.moovie.tv.data.search.applyFilters
 import io.ktor.client.plugins.ResponseException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Accès TMDB. La clé API et la langue viennent des réglages (fournies par
@@ -10,9 +12,9 @@ import io.ktor.client.plugins.ResponseException
  */
 class TmdbRepository(
     private val language: String = "fr-FR",
+    /** Accès TMDB ; remplaçable pour se tester sans réseau. */
+    private val api: TmdbApi = TmdbApi(clientTmdb),
 ) {
-    private val api = TmdbApi(clientTmdb)
-
     suspend fun trendingMovies(apiKey: String): List<TmdbItem> =
         api.trending("movie", apiKey, language).results
 
@@ -244,17 +246,25 @@ class TmdbRepository(
     suspend fun imdbId(apiKey: String, isTv: Boolean, id: Int): String? {
         if (apiKey.isBlank()) return null
         val key = (if (isTv) "tv" else "movie") to id
-        if (imdbIds.containsKey(key)) return imdbIds[key]
+        // Lecture et écriture sous le verrou, mais jamais l'appel réseau dedans :
+        // tenir un Mutex pendant une requête bloquerait toutes les fiches.
+        imdbIdsVerrou.withLock {
+            if (imdbIds.containsKey(key)) return imdbIds[key]
+        }
         // Le `Result` compte : `getOrNull()` confondrait « TMDB répond que ce
         // titre n'a pas d'IMDB » et « la requête a échoué ». Seul le premier cas
         // se mémorise — mettre null en cache sur un timeout condamnerait le
         // titre pour toute la session alors que rien ne le disqualifie.
-        val answer = runCatching {
-            api.externalIds(if (isTv) "tv" else "movie", id, apiKey).imdbId
+        val answer = try {
+            Result.success(api.externalIds(if (isTv) "tv" else "movie", id, apiKey).imdbId)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
         }
         if (answer.isFailure) return null
         val found = answer.getOrNull()?.takeIf { it.startsWith("tt") }
-        imdbIds[key] = found
+        imdbIdsVerrou.withLock { imdbIds[key] = found }
         return found
     }
 
@@ -269,6 +279,14 @@ class TmdbRepository(
          * cherché », ce qu'une simple lecture à null ne saurait pas faire.
          */
         val imdbIds = mutableMapOf<Pair<String, Int>, String?>()
+
+        /**
+         * Protège [imdbIds] : plusieurs ViewModels peuvent ouvrir une fiche en
+         * même temps, sur des coroutines différentes. Un `HashMap` modifié en
+         * parallèle peut lever ou se corrompre, et `containsKey` puis `get` ne
+         * forment pas une lecture atomique sans ce verrou.
+         */
+        val imdbIdsVerrou = Mutex()
 
         /**
          * Anglais : c'est la langue dans laquelle TMDB a une bande-annonce quand

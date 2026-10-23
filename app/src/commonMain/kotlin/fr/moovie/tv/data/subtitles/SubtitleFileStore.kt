@@ -123,22 +123,23 @@ class SubtitleFileStore(
     }
 
     /**
-     * Identifiants des sous-titres déjà téléchargés pour ce média.
+     * Identifiants, parmi [candidats], de ceux déjà téléchargés pour ce média.
      *
      * Sert à marquer la liste : sans ce repère, retrouver lequel des candidats
      * a déjà été payé relève du pari, et se tromper coûte une unité d'un quota
      * qui se compte sur les doigts d'une main.
+     *
+     * Rend les `fileId` d'origine, et non leur forme sur disque : c'est eux que
+     * l'écran compare. Le nom est reconstruit par le même [safe] que
+     * [storeOriginal], et une correspondance exacte écarte au passage les
+     * versions recalées (`_v<n>`), qui ne portent jamais ce nom-là.
      */
-    fun storedIds(mediaKey: String): Set<String> {
+    fun storedIds(mediaKey: String, candidats: Collection<SubtitleCandidate>): Set<String> {
         val prefix = safe(mediaKey) + "_"
-        return contenu()
-            .asSequence()
-            .map { it.name }
-            .filter { it.startsWith(prefix) && it.endsWith(".srt") }
-            // Les versions recalées portent un suffixe `_v<n>` : ce sont des
-            // dérivés du même téléchargement, pas des téléchargements de plus.
-            .map { it.removePrefix(prefix).removeSuffix(".srt") }
-            .filterNot { it.contains("_v") }
+        val presents = contenu().map { it.name }.toSet()
+        return candidats
+            .filter { "$prefix${safe(it.fileId)}.srt" in presents }
+            .map { it.fileId }
             .toSet()
     }
 
@@ -149,7 +150,7 @@ class SubtitleFileStore(
             .takeIf { fs.metadataOrNull(it)?.isRegularFile == true }
 
     fun existing(mediaKey: String, candidate: SubtitleCandidate): Path? =
-        (dir / "${safe(mediaKey)}_${candidate.fileId}.srt")
+        (dir / "${safe(mediaKey)}_${safe(candidate.fileId)}.srt")
             .takeIf { fs.metadataOrNull(it)?.isRegularFile == true }
 
     /**

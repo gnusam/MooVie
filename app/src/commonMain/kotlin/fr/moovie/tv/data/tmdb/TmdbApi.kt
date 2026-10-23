@@ -19,7 +19,7 @@ import io.ktor.client.request.parameter
  * dépendent les bornes d'année de [discover], dont seule la moitié concerne le
  * média demandé.
  */
-class TmdbApi(private val client: HttpClient) {
+open class TmdbApi(private val client: HttpClient) {
 
     suspend fun trending(
         media: String, // "movie" | "tv" | "all"
@@ -260,7 +260,7 @@ class TmdbApi(private val client: HttpClient) {
      * Sans `language` : ce sont des identifiants, pas du texte traduit, et le
      * paramètre ne ferait que salir le cache HTTP d'une variante par langue.
      */
-    suspend fun externalIds(
+    open suspend fun externalIds(
         media: String, // "movie" | "tv"
         id: Int,
         apiKey: String,
