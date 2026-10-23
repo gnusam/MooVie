@@ -16,3 +16,5 @@ actual val openSubtitlesApiKey: String =
 actual val deviceName: String
     get() = runCatching { java.net.InetAddress.getLocalHost().hostName }
         .getOrNull()?.takeIf { it.isNotBlank() } ?: "Moo-vie"
+
+actual val supportsAudioTrackSelection: Boolean = true

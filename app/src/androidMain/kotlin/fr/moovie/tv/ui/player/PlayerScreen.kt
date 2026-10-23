@@ -211,6 +211,8 @@ private const val SCRUB_COMMIT_MS = 700L
 fun PlayerScreen(
     streamUrl: String,
     headers: Map<String, String> = emptyMap(),
+    /** Piste audio préférée (ISO 639-1) d'un manifeste multi-pistes ; null = défaut du flux. */
+    audioLanguage: String? = null,
     mediaKey: String = "",
     subtitles: Map<String, String> = emptyMap(),
     title: String = "",
@@ -568,6 +570,11 @@ fun PlayerScreen(
         chronoPret = Chrono.debut("lecteur : du montage du flux à l'état prêt")
         player.stop()
         player.clearMediaItems()
+        // Simple préférence : un choix manuel de piste (override) la devance.
+        // Écrite à chaque flux, null compris : le lecteur est réutilisé d'un
+        // média à l'autre, et sans cela la langue du flux précédent (VO « en »)
+        // resterait sur le suivant.
+        player.applyPreferredAudioLanguage(audioLanguage)
 
         // La piste audio de la langue choisie sur la fiche : un fichier « Dual
         // Audio » marque souvent le doublage anglais par défaut, et une VO se
@@ -643,6 +650,9 @@ fun PlayerScreen(
                     if (stream == null || stream.url.isBlank()) return@launch
                     val at = player.currentPosition
                     httpFactory.setDefaultRequestProperties(stream.headers)
+                    // La langue de l'alternative, null compris : celle du flux
+                    // d'origine ne vaut pas pour une autre source.
+                    player.applyPreferredAudioLanguage(stream.audioLanguage)
                     player.setMediaItem(MediaItem.fromUri(stream.url))
                     player.prepare()
                     if (at > 0) player.seekTo(at)
@@ -1887,3 +1897,9 @@ private fun ExoPlayer.videoHeights(): List<Int> = runCatching {
 /** Tampon exigé avant la première image, et après un rebuffering (voir le LoadControl). */
 private const val PLAYER_BUFFER_FOR_PLAYBACK_MS = 1_500
 private const val PLAYER_BUFFER_AFTER_REBUFFER_MS = 3_000
+
+/** Simple préférence de piste audio ; un choix manuel (override) la devance. */
+private fun androidx.media3.common.Player.applyPreferredAudioLanguage(language: String?) {
+    trackSelectionParameters =
+        trackSelectionParameters.buildUpon().setPreferredAudioLanguage(language).build()
+}
