@@ -12,6 +12,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.Dispatcher
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -39,8 +40,24 @@ private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
  */
 class OkHttpGateway(private val client: OkHttpClient) : HttpGateway {
 
+    /**
+     * Le client tel quel, mais avec son propre `Dispatcher`.
+     *
+     * Les appels passent par `enqueue`, donc par la file d'OkHttp, plafonnée par
+     * défaut à **cinq requêtes simultanées par hôte**. Les `execute()` d'avant
+     * n'y étaient pas soumis, et la résolution sonde volontiers plusieurs liens
+     * d'un même hébergeur en parallèle : garder le plafond par défaut aurait
+     * mis en file ce qui partait jusque-là d'un coup. Un dispatcher dédié, pour
+     * ne pas changer les limites du client brut partagé avec le relais local.
+     */
+    private val asynchrone: OkHttpClient by lazy {
+        client.newBuilder()
+            .dispatcher(Dispatcher().apply { maxRequests = 128; maxRequestsPerHost = 32 })
+            .build()
+    }
+
     private val noRedirect: OkHttpClient by lazy {
-        client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+        asynchrone.newBuilder().followRedirects(false).followSslRedirects(false).build()
     }
 
     /**
@@ -77,7 +94,7 @@ class OkHttpGateway(private val client: OkHttpClient) : HttpGateway {
             }
         }
 
-        val http = if (request.followRedirects) client else noRedirect
+        val http = if (request.followRedirects) asynchrone else noRedirect
         val call = http.newCall(builder.build())
 
         return try {
