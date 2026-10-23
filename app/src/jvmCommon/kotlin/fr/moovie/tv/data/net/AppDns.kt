@@ -6,6 +6,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.dnsoverhttps.DnsOverHttps
 import java.io.IOException
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
@@ -79,7 +80,9 @@ object AppDns : Dns {
             .bootstrapDnsHosts(provider.bootstrapAddresses())
             .build()
 
-    override fun lookup(hostname: String): List<InetAddress> {
+    override fun lookup(hostname: String): List<InetAddress> = ipv4First(resoudre(hostname))
+
+    private fun resoudre(hostname: String): List<InetAddress> {
         val doh = delegate
         if (doh === Dns.SYSTEM) return Dns.SYSTEM.lookup(hostname)
         if (System.currentTimeMillis() < dohEnPanneJusqua) return Dns.SYSTEM.lookup(hostname)
@@ -122,3 +125,18 @@ object AppDns : Dns {
     /** Durée pendant laquelle on ne retente pas le DoH après une panne réseau. */
     internal const val DOH_PANNE_MS = 60_000L
 }
+
+/**
+ * IPv4 d'abord, IPv6 ensuite, l'ordre de chaque famille conservé.
+ *
+ * `DnsOverHttps` lance les requêtes A et AAAA en parallèle et rend les adresses
+ * dans leur ordre d'arrivée : une fois sur deux, l'IPv6 passe devant. Sur un
+ * réseau qui annonce une adresse IPv6 sans la router (l'émulateur, mais aussi
+ * des box mal configurées), la connexion part dans le vide jusqu'au
+ * `connectTimeout` de dix secondes, et le catalogue dépasse son budget de douze
+ * avant qu'OkHttp n'essaie l'IPv4. Mesuré le 23/10/2026 : un catalogue sur
+ * trois tombait au hasard à chaque chargement ; IPv6 coupé, plus aucun.
+ * L'IPv6 reste en repli, pour les réseaux qui n'ont qu'elle.
+ */
+internal fun ipv4First(addresses: List<InetAddress>): List<InetAddress> =
+    addresses.sortedBy { it is Inet6Address }
