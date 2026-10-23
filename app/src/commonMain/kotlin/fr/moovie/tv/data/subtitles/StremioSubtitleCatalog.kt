@@ -175,14 +175,64 @@ class StremioSubtitleCatalog(
          * et les guillemets français — les caractères qui cassent en premier.
          */
         fun cp1252(octets: ByteArray): String {
-            val hauts = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ''\"\"•–—˜™š›œžŸ"
             val sb = StringBuilder(octets.size)
             for (b in octets) {
                 val v = b.toInt() and 0xFF
-                sb.append(if (v in 0x80..0x9F) hauts[v - 0x80] else v.toChar())
+                sb.append(if (v in 0x80..0x9F) CP1252_HAUTS[v - 0x80] else v.toChar())
             }
             return sb.toString()
         }
+
+        /**
+         * Les 32 positions 0x80-0x9F de Windows-1252, dans l'ordre des octets.
+         *
+         * Les cinq positions indéfinies (0x81, 0x8D, 0x8F, 0x90, 0x9D) gardent
+         * leur valeur brute, comme le fait un navigateur : elles ne doivent ni
+         * disparaître ni faire lever l'index. Écrit en échappements Unicode pour
+         * que les guillemets et l'apostrophe typographiques soient explicites.
+         */
+        internal val CP1252_HAUTS: String = intArrayOf(
+            0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+            0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+            0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+            0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+        ).map { it.toChar() }.joinToString("")
+
+        /**
+         * Nom de release lisible : le fichier vidéo d'origine, sans son dossier
+         * (chemin Windows ou POSIX) ni son extension. À défaut, le nom du fichier
+         * de sous-titres. Chaîne vide quand l'addon ne donne ni l'un ni l'autre.
+         */
+        fun nomDeRelease(entree: JsonObject): String {
+            val video = chaine(entree, "movieReleaseName")
+                ?.let { dernierSegment(it).sansExtension(EXTENSIONS_VIDEO) }
+            if (!video.isNullOrEmpty()) return video
+            val sousTitre = chaine(entree, "subtitleFileName")
+                ?.let { dernierSegment(it).sansExtension(EXTENSIONS_SOUS_TITRE) }
+            return sousTitre.orEmpty()
+        }
+
+        /** Cadence en images par seconde, depuis `fpsMilli` (23976 vers 23.976). Null si absente ou nulle. */
+        fun fpsDe(entree: JsonObject): Double? =
+            (entree["fpsMilli"] as? JsonPrimitive)?.content
+                ?.toDoubleOrNull()
+                ?.takeIf { it > 0 }
+                ?.div(1000.0)
+
+        private fun chaine(entree: JsonObject, cle: String): String? =
+            (entree[cle] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+
+        /** Dernier segment d'un chemin, séparateurs `/` et `\` confondus. */
+        private fun dernierSegment(chemin: String): String =
+            chemin.substringAfterLast('\\').substringAfterLast('/').trim()
+
+        private fun String.sansExtension(extensions: List<String>): String {
+            val extension = extensions.firstOrNull { endsWith(it, ignoreCase = true) } ?: return this
+            return dropLast(extension.length)
+        }
+
+        private val EXTENSIONS_VIDEO = listOf(".avi", ".mkv", ".mp4")
+        private val EXTENSIONS_SOUS_TITRE = listOf(".srt", ".sub", ".ass")
 
         /**
          * ISO-639-2 vers ISO-639-1, parce que les deux mondes ne parlent pas le
