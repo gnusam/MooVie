@@ -214,8 +214,8 @@
     <string name="settings_doh_resolver">Resolver</string>
     <string name="settings_cat_sources">Sources &amp; hosts</string>
     <string name="settings_sources_help">Order = playback priority (the first is tried first).</string>
-    <string name="settings_debrid">Debrid for Stremio streams</string>
-    <string name="settings_debrid_help">The service that serves Torrentio files. A service without a key in the configuration stays greyed out; switching clears the sources cache.</string>
+    <string name="settings_debrid">Preferred debrid for Stremio streams</string>
+    <string name="settings_debrid_help">Every service with a key is queried together: if one is down, the other serves. For the same file, this one comes first. A service without a key in the configuration stays greyed out; switching clears the sources cache.</string>
     <string name="settings_debrid_no_key">%1$s (no key)</string>
     <string name="settings_move_up">Move %1$s up</string>
     <string name="settings_move_down">Move %1$s down</string>

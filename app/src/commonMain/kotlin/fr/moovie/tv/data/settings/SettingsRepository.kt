@@ -370,8 +370,10 @@ class SettingsRepository {
         store.edit { it[STREAM_LANGUAGE] = value.name }
 
     /**
-     * Le debrid derrière le catalogue Stremio. Real-Debrid par défaut : c'est
-     * celui qui a servi à valider toute la chaîne. Voir [DebridService].
+     * Le debrid **prioritaire** du catalogue Stremio : tous ceux qui ont une
+     * clé sont interrogés, celui-ci passe devant à fichier égal (voir
+     * `StremioProvider.fusion`). Real-Debrid par défaut : c'est celui qui a
+     * servi à valider toute la chaîne. Voir [DebridService].
      */
     val debridService: Flow<DebridService> =
         store.data.map {

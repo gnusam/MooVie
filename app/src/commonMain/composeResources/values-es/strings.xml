@@ -214,8 +214,8 @@
     <string name="settings_doh_resolver">Resolutor</string>
     <string name="settings_cat_sources">Fuentes y hosts</string>
     <string name="settings_sources_help">Orden = prioridad de reproducción (el primero se prueba antes).</string>
-    <string name="settings_debrid">Debrid de los flujos Stremio</string>
-    <string name="settings_debrid_help">El servicio que sirve los archivos de Torrentio. Un servicio sin clave en la configuración queda en gris; cambiarlo vacía la caché de fuentes.</string>
+    <string name="settings_debrid">Debrid preferido de los flujos Stremio</string>
+    <string name="settings_debrid_help">Todos los servicios con clave se consultan a la vez: si uno cae, el otro sirve. Para el mismo archivo, este va primero. Un servicio sin clave en la configuración queda en gris; cambiarlo vacía la caché de fuentes.</string>
     <string name="settings_debrid_no_key">%1$s (sin clave)</string>
     <string name="settings_move_up">Subir %1$s</string>
     <string name="settings_move_down">Bajar %1$s</string>

@@ -15,6 +15,11 @@ package fr.moovie.tv.data.sources
  * jour où on aura envie ». Un service sans clé dans la configuration reste
  * proposé, grisé : on voit qu'il existe et ce qu'il manque.
  *
+ * Depuis le 25/10/2026 le choix n'est plus exclusif mais une **priorité** :
+ * TorBox seul est tombé ce soir-là (0 flux sur Fullmetal Alchemist), et Sam a
+ * demandé « le cumul des deux pour que ce soit fonctionnel ». Tous les
+ * services qui ont une clé répondent ensemble, voir `StremioProvider.fusion`.
+ *
  * @property parametre le nom du paramètre dans l'adresse de l'addon.
  * @property nom le nom affiché, tel que le service l'écrit.
  */

@@ -7,7 +7,11 @@ import fr.moovie.tv.core.sources.port.SourceProvider
 import fr.moovie.tv.core.sources.port.getBody
 import fr.moovie.tv.data.settings.SettingsRepository
 import fr.moovie.tv.data.tmdb.TmdbRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -93,8 +97,10 @@ class StremioProvider(
     private val json = Json { ignoreUnknownKeys = true }
 
     override suspend fun sourcesFor(media: MediaRef): List<EmbedLink> {
-        val base = (addonUrl ?: StremioConfig.addonUrl(settings.debridService.first())).trim().trimEnd('/')
-        if (base.isBlank()) return emptyList()
+        val bases = (addonUrl?.let { listOf(it) } ?: basesParPriorite())
+            .map { it.trim().trimEnd('/') }
+            .filter { it.isNotBlank() }
+        if (bases.isEmpty()) return emptyList()
 
         val apiKey = cleTmdb ?: settings.tmdbApiKey.first()
         val isTv = media is MediaRef.Episode
@@ -110,22 +116,88 @@ class StremioProvider(
         // `stremio-mpv/1.0` accepté). OkHttp enverrait `okhttp/4.x`, qui tombe
         // dans la même catégorie. La panne aurait été muette — un catalogue qui
         // rend une liste vide sur chaque fiche, sans erreur nulle part.
-        val body = http.getBody(
-            "$base/stream/$type/$id.json",
-            headers = mapOf("User-Agent" to Ua.BROWSER, "Accept" to "application/json"),
-        ) ?: return emptyList()
-        return parse(
-            body,
-            if (media is MediaRef.Episode) CIBLE_EPISODE else CIBLE_FILM,
-            originalLanguage = media.originalLanguage,
-        )
+        //
+        // Tous les debrids configurés sont interrogés **ensemble**, chacun sous
+        // son propre délai : le 25/10/2026, TorBox seul a rendu 0 flux sur
+        // Fullmetal Alchemist (Torrentio : « TorBox is currently unavailable »)
+        // pendant que Real-Debrid en rendait 75. Un seul service, c'est une
+        // fiche vide à chacune de ses pannes. Voir [fusion].
+        val corps = coroutineScope {
+            bases.map { base ->
+                async {
+                    withTimeoutOrNull(DEBRID_TIMEOUT_MS) {
+                        http.getBody(
+                            "$base/stream/$type/$id.json",
+                            headers = mapOf("User-Agent" to Ua.BROWSER, "Accept" to "application/json"),
+                        )
+                    }
+                }
+            }.awaitAll()
+        }
+        val utiles = corps.filterNotNull().filter(::reponseUtile)
+        // Aucun debrid n'a répondu pour de bon : c'est une panne, pas un titre
+        // sans flux. Une liste vide serait mise en cache six heures comme une
+        // réponse ; l'exception marque le catalogue en échec, et la prochaine
+        // ouverture de la fiche redemande.
+        if (utiles.isEmpty()) throw DebridIndisponible()
+
+        val cible = if (media is MediaRef.Episode) CIBLE_EPISODE else CIBLE_FILM
+        return fusion(utiles.map { classer(it, cible, media.originalLanguage) })
+    }
+
+    /**
+     * Les adresses d'addon de chaque debrid qui a une clé, celui des réglages
+     * en tête : il départage deux fichiers identiques, voir [fusion].
+     */
+    private suspend fun basesParPriorite(): List<String> {
+        val prefere = settings.debridService.first()
+        return StremioConfig.disponibles()
+            .sortedBy { if (it == prefere) 0 else 1 }
+            .map { StremioConfig.addonUrl(it) }
     }
 
     /**
      * Sans réseau, donc testable sur une réponse enregistrée — c'est là que vit
      * tout ce qui peut se tromper.
      */
-    internal fun parse(body: String, cible: Long = CIBLE_FILM, originalLanguage: String = ""): List<EmbedLink> {
+    internal fun parse(body: String, cible: Long = CIBLE_FILM, originalLanguage: String = ""): List<EmbedLink> =
+        classer(body, cible, originalLanguage).map { it.lien }
+
+    /**
+     * Fusionne les listes de plusieurs debrids, chacune déjà classée, la
+     * première étant celle du debrid préféré.
+     *
+     * On ne dédoublonne **pas** entre services : un même fichier chez
+     * Real-Debrid et chez TorBox a deux URL, et c'est précisément ce qui sert.
+     * À rang égal (définition, codec, poids identiques), le tri stable les
+     * place côte à côte, le préféré d'abord — si sa lecture échoue (panne,
+     * « failed_infringement » de Real-Debrid), la cascade du lecteur essaie le
+     * même fichier chez l'autre avant de passer à une autre release.
+     *
+     * Le nom du debrid s'ajoute à la variante dès que deux services ont
+     * répondu : sans lui, le panneau des sources montrerait des doublons
+     * apparents.
+     */
+    internal fun fusion(listes: List<List<Classe>>): List<EmbedLink> {
+        if (listes.size == 1) return listes.single().map { it.lien }
+        return listes
+            .flatMapIndexed { rang, liste -> liste.map { rang to it } }
+            .sortedWith(
+                compareBy(
+                    { it.second.lien.deferred },
+                    { it.second.definition },
+                    { it.second.codec },
+                    { ecart(it.second.octets, it.second.cible) },
+                    { it.first },
+                ),
+            )
+            .map { (_, c) ->
+                val service = debridDe(c.lien.url) ?: return@map c.lien
+                c.lien.copy(variant = listOfNotNull(c.lien.variant, service.nom).joinToString(" · "))
+            }
+    }
+
+    internal fun classer(body: String, cible: Long, originalLanguage: String): List<Classe> {
         val streams = runCatching {
             json.parseToJsonElement(body).jsonObject["streams"]?.jsonArray
         }.getOrNull() ?: return emptyList()
@@ -173,6 +245,7 @@ class StremioProvider(
                 definition = qualityRank(qualityOf(name)),
                 codec = codecRank(release),
                 octets = sizeBytes(title),
+                cible = cible,
             )
         }
             // Ce qui joue tout de suite d'abord ; parmi ceux-là, la définition
@@ -180,16 +253,58 @@ class StremioProvider(
             .sortedWith(
                 compareBy({ it.lien.deferred }, { it.definition }, { it.codec }, { ecart(it.octets, cible) }),
             )
-            .map { it.lien }
     }
 
-    /** Un lien et les deux nombres qui décident de sa place. Interne au tri. */
-    private data class Classe(val lien: EmbedLink, val definition: Int, val codec: Int, val octets: Long?)
+    /** Un lien et les nombres qui décident de sa place. Interne au tri. */
+    internal data class Classe(
+        val lien: EmbedLink,
+        val definition: Int,
+        val codec: Int,
+        val octets: Long?,
+        val cible: Long,
+    )
+
+    /** Aucun debrid n'a rendu de flux exploitable : panne, à redemander. */
+    class DebridIndisponible : Exception("aucun debrid n'a répondu")
 
     private fun kotlinx.serialization.json.JsonPrimitive.contentOrNull(): String? =
         content.takeIf { it.isNotBlank() && it != "null" }
 
     internal companion object {
+
+        /**
+         * Délai par debrid, sous les 12 s que l'écran des détails accorde au
+         * catalogue entier : un service qui traîne (TorBox le 25/10/2026, 5 s
+         * par appel quand il répondait) est abandonné à temps pour que l'autre
+         * soit servi.
+         */
+        const val DEBRID_TIMEOUT_MS = 9_000L
+
+        /**
+         * Vrai si l'addon a réellement répondu pour ce debrid : au moins un flux
+         * avec une URL qui ne soit pas un carton d'erreur. Torrentio avec un
+         * debrid rend tous les torrents connus, en cache ou non ; une liste vide
+         * là où l'addon sans debrid en voit 57 (Fullmetal Alchemist, 25/10/2026),
+         * ou le seul carton « TB error », c'est le debrid qui est tombé.
+         */
+        fun reponseUtile(body: String): Boolean {
+            val streams = runCatching {
+                Json.parseToJsonElement(body).jsonObject["streams"]?.jsonArray
+            }.getOrNull() ?: return false
+            return streams.any { element ->
+                val o = runCatching { element.jsonObject }.getOrNull() ?: return@any false
+                val url = o["url"]?.jsonPrimitive?.content
+                val name = o["name"]?.jsonPrimitive?.content.orEmpty()
+                !url.isNullOrBlank() && url != "null" && !ERREUR_RE.containsMatchIn(name)
+            }
+        }
+
+        /** `Torrentio\nTB error`, `RD error` : le carton qu'affiche Torrentio quand son debrid échoue. */
+        private val ERREUR_RE = Regex("""\b[A-Z]{2} error\b""")
+
+        /** Le debrid d'une URL de résolution Torrentio (`/resolve/torbox/…`), ou null. */
+        fun debridDe(url: String): DebridService? =
+            DebridService.entries.firstOrNull { url.contains("/resolve/${it.parametre}/") }
 
         /**
          * Vrai pour un encodage qu'aucun décodeur matériel courant ne lit.
